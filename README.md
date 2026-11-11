@@ -25,7 +25,14 @@ sudo apt install build-essential cmake libsfml-dev
 ```
 (On this machine all of these are already installed.)
 
-### From the terminal
+### Quickest: `run.sh`
+```bash
+./run.sh dungeon
+```
+This builds (only what changed) and starts the program with `maps/dungeon.txt`. Use `./run.sh` alone to be asked for the map name,
+or `./run.sh --clean dungeon` to wipe `build/` and rebuild from scratch first.
+
+### From the terminal, step by step
 ```bash
 cmake -S . -B build
 ```
@@ -54,7 +61,7 @@ maps you save end up in `maps/`.
 
 | Input | Effect |
 |---|---|
-| **Left click** | Select a tile (it turns cyan) |
+| **Left click** | Select a tile (cyan frame + light cyan tint; the tile underneath stays visible) |
 | **Space** | On the selected tile: ground ↔ wall. A start or end tile turns back into ground. |
 | **Right click** | Select a tile and toggle it at once (like left click + Space) |
 | **Enter** | On the selected ground tile: place the **start** (green), or the **end** (red) if a start already exists. On a start or end tile: remove it. |
@@ -62,7 +69,8 @@ maps you save end up in `maps/`.
 | **E** | Save the map to `maps/<name>.txt` and close |
 | **Esc** / close window | Quit **without** saving |
 
-Hovering the mouse over a tile highlights it.
+Hovering the mouse over a tile gives it a white frame. Both highlights are drawn on top of the tile's own sprite, so you can always see
+whether it is ground, wall, start, end or path.
 
 ---
 
@@ -88,7 +96,8 @@ the `Character` on the start tile (or the first empty tile). Each frame it:
 **`Board` (Tile.h/.cpp)**
 - `tileTypes`: one `tiletype` per tile (`wall`, `ground`, `startnode`, `endnode`, `checkpoint`). Tile `i` is at column `i % 20`, row `i / 20`.
 - `getTileN(x, y)` converts pixels to a tile index; `getTilePos(i)` converts a tile index to the pixel position of its top-left corner.
-- `drawBoard()` draws the right sprite for each tile, the cyan/hover highlights, and then **lights up every tile in `pathTiles` in blue**.
+- `drawBoard()` works in three passes: (1) every tile's own sprite, (2) **every tile in `pathTiles` lit blue**, (3) the selection
+  (cyan) and hover (white) highlights, as see-through boxes with inward outlines.
 - `importBoard()` / `exportBoard()` read and write `maps/<name>.txt`.
 - `getTile(x, y)`, `calcNeighbors()`, `recalculateNav()`: the merged **NavGraph**. Every non-wall tile becomes a `vertex` holding
   the coordinates of its walkable neighbours (all 8 directions). Look one up with `nav.getVertex(x, y, v)` and read `v.adjacent`.

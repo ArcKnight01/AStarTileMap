@@ -61,106 +61,53 @@ Board::Board(sf::RenderWindow& window, float height, float width, int tilesInRow
 }
 
 void Board::drawBoard(sf::RenderWindow& window) {
-	//Move a single rectangle across the board to draw each tile
-	sf::Vector2f tilePos;
-	for (int i = 0; i < tileCount; i++) {
-		tilePos = getTilePos(i);
-		tileShape.setPosition(tilePos);
-		wallSprite.setPosition(tilePos);
-		startSprite.setPosition(tilePos);
-		endSprite.setPosition(tilePos);
-		floorSprite.setPosition(tilePos);
-		checkPointSprite.setPosition(tilePos);
+	hasBeenConverted = (hasClicked && (spaceWasPressed || enterWasPressed) && clickPos == lastTileConverted);
 
-		if (hasClicked && (spaceWasPressed || enterWasPressed) && clickPos == lastTileConverted) {
-			hasBeenConverted = true;
+	//1) every tile always draws its own sprite, so its state stays visible under any highlight
+	for (int i = 0; i < tileCount; i++) {
+		sf::Sprite* sprite = &floorSprite;
+		switch (tileTypes[i]) {
+		case wall:       sprite = &wallSprite;       break;
+		case startnode:  sprite = &startSprite;      break;
+		case endnode:    sprite = &endSprite;        break;
+		case checkpoint: sprite = &checkPointSprite; break;
+		case ground:     sprite = &floorSprite;      break;
 		}
-		else {
-			hasBeenConverted = false;
-		}
-		
-		if (i != clickPos || hasClicked == false) {
-			
-			if (tileTypes[i] == ground) {
-				//tileShape.setFillColor(sf::Color::White);
-				tileShape.setFillColor(sf::Color(65, 55, 34));
-			}
-			else if (tileTypes[i] == wall) {
-				tileShape.setFillColor(sf::Color::Black);
-				window.draw(wallSprite);
-			}
-			else if (tileTypes[i] == startnode) {
-				tileShape.setFillColor(sf::Color::Green);
-			}
-			else if (tileTypes[i] == endnode) {
-				tileShape.setFillColor(sf::Color::Red);
-			}
-			//tileShape.setFillColor(sf::Color::Yellow);
-		}
-		else if (i == clickPos && hasClicked && !spacePressed && !enterPressed && ( (hasBeenConverted == false && (i != lastTileConverted || (lastTileConverted == 0 && (!spaceWasPressed||!enterWasPressed)))) || (i == lastTileConverted && hasBeenConverted && conversionReset ) ) ) {
-			if (tileTypes[i] == ground) {
-				tileShape.setFillColor(sf::Color::Cyan);
-			}
-			else if (tileTypes[i] == wall) {
-				tileShape.setFillColor(sf::Color(0, 200, 200));
-			}
-			else {
-				tileShape.setFillColor(sf::Color(0, 220, 220));
-			}
-			//tileShape.setFillColor(sf::Color::Cyan);
-			
-		}
-		else if (i == clickPos && hasClicked && i == lastTileConverted && hasBeenConverted && (spaceWasPressed||enterWasPressed) ) {
-			if (tileTypes[i] == ground) {
-				//tileShape.setFillColor(sf::Color::White);
-				tileShape.setFillColor(sf::Color(65, 55, 34));
-			}
-			else if (tileTypes[i] == wall) {
-				tileShape.setFillColor(sf::Color::Black);
-				
-			}
-			else if (tileTypes[i] == startnode) {
-				tileShape.setFillColor(sf::Color::Green);
-			}
-			else if (tileTypes[i] == endnode) {
-				tileShape.setFillColor(sf::Color::Red);
-			}
-		}
-		else {
-			tileShape.setFillColor(sf::Color::Magenta);
-			//indicates an error, or that none of the above was met
-		}
-		if (i == leftMousePos && (i != clickPos || !hasClicked )) {
-			tileShape.setFillColor(sf::Color(200, 220, 200));
-		}
-		
-		if (tileTypes[i] == wall && (i != clickPos) && i != leftMousePos ) {
-			window.draw(wallSprite);
-		}
-		else if (tileTypes[i] == ground && (i != clickPos) && i != leftMousePos) {
-			window.draw(floorSprite);
-		}
-		else if (tileTypes[i] == startnode && (i != clickPos) && i != leftMousePos) {
-			window.draw(startSprite);
-		}
-		else if (tileTypes[i] == endnode && (i != clickPos) && i != leftMousePos) {
-			window.draw(endSprite);
-		}
-		else if (tileTypes[i] == checkpoint && (i != clickPos) && i != leftMousePos) {
-			window.draw(checkPointSprite);
-		}
-		else {
-			window.draw(tileShape);
-			//window.draw(wallSprite);
-		}
+		sprite->setPosition(getTilePos(i));
+		window.draw(*sprite);
 	}
 
-	//light up the path (blue sprite); start/end keep their green/red sprites
+	//2) light up the path (blue sprite); start/end keep their green/red sprites
 	for (int i : pathTiles) {
 		if (i >= 0 && i < tileCount && tileTypes[i] != startnode && tileTypes[i] != endnode && tileTypes[i] != wall) {
 			pathSprite.setPosition(getTilePos(i));
 			window.draw(pathSprite);
 		}
+	}
+
+	//3) highlights go ON TOP of the tile: a see-through tint plus an outline drawn inward
+	//   (negative thickness), so the sprite underneath and the neighbouring tiles stay visible
+	auto drawHighlight = [&](int i, sf::Color color, sf::Uint8 tintAlpha, float outline) {
+		if (i < 0 || i >= tileCount) return; //mouse outside the board
+		sf::RectangleShape box(sf::Vector2f(tileW, tileH));
+		box.setPosition(getTilePos(i));
+		box.setFillColor(sf::Color(color.r, color.g, color.b, tintAlpha));
+		box.setOutlineColor(color);
+		box.setOutlineThickness(-outline);
+		window.draw(box);
+	};
+
+	//selected tile (same rule as before for when the selection shows: it hides right after
+	//the tile is converted, until you click again)
+	bool showSelection = hasClicked && !spacePressed && !enterPressed &&
+		((hasBeenConverted == false && (clickPos != lastTileConverted || (lastTileConverted == 0 && (!spaceWasPressed || !enterWasPressed))))
+		|| (clickPos == lastTileConverted && hasBeenConverted && conversionReset));
+	if (showSelection) {
+		drawHighlight(clickPos, sf::Color::Cyan, 45, 5.f);
+	}
+	//hovered tile (skipped when it is the visible selection, which already has a frame)
+	if (!(showSelection && leftMousePos == clickPos)) {
+		drawHighlight(leftMousePos, sf::Color::White, 40, 3.f);
 	}
 }
 

@@ -40,9 +40,9 @@ public:
 	//name of board 
 	string boardname;
 
-	int clickPos;
-	int leftMousePos;
-	int lastTileConverted;
+	int clickPos = 0;
+	int leftMousePos = -1;
+	int lastTileConverted = 0; //0 = nothing converted yet (the code checks for this)
 
 	bool conversionReset = false; // if true then 
 	bool hasBeenConverted = false;
