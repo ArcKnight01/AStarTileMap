@@ -1,62 +1,41 @@
 #include "Tile.h"
+#include "CostMap.h"
 
-// Placing tiles by selecting them (replaces the old Space / Enter controls in convertTile(), which are kept, commented out,
-// in main.cpp).
-//   1. click a tile                        -> beginPlacement(): it is selected and a list of types appears next to it
-//   2. Up / Down                           -> movePlacementChoice(): the tile previews the highlighted type
-//   3. click the same tile again, or Enter -> confirmPlacement()
+// Placing the start and end by selecting a cell (costmap branch; editing the cost map itself comes later).
+//   1. click a cell                        -> beginPlacement(): it is selected and a list appears next to it
+//   2. Up / Down                           -> movePlacementChoice(): the cell previews the highlighted option
+//   3. click the same cell again, or Enter -> confirmPlacement()
 //   right-click, Backspace or Esc          -> cancelPlacement()
+// Start / End are offered only while they don't exist yet and never on a lethal cell; Clear removes them.
 
-string Board::getTileTypeName(tiletype type) {
-	switch (type) {
-	case ground:     return "Ground";
-	case wall:       return "Wall";
-	case startnode:  return "Start";
-	case endnode:    return "End";
-	case checkpoint: return "Ground"; //the character's breadcrumb is ground underneath
+string Board::getPlacementName(PlacementOption option) {
+	switch (option) {
+	case PlacementOption::Start: return "Start";
+	case PlacementOption::End:   return "End";
+	case PlacementOption::Clear: return "Clear";
 	}
-	return "Ground";
-}
-
-sf::Sprite& Board::getSpriteFor(tiletype type) {
-	switch (type) {
-	case wall:       return wallSprite;
-	case startnode:  return startSprite;
-	case endnode:    return endSprite;
-	case checkpoint: return checkPointSprite;
-	case ground:     return floorSprite;
-	}
-	return floorSprite;
+	return "Clear";
 }
 
 void Board::beginPlacement(int tile) {
-	if (tile < 0 || tile >= tileCount) {
+	if (tile < 0 || tile >= map.getCellCount()) {
 		cancelPlacement();
+		return;
+	}
+	placementOptions.clear();
+	bool lethal = isLethal(map.getLayer("cost")[tile], parameters);
+	bool isStart = startExists && tile == startPos;
+	bool isEnd = endExists && tile == endPos;
+	if (!startExists && !lethal) placementOptions.push_back(PlacementOption::Start);
+	if (!endExists && !lethal && !isStart) placementOptions.push_back(PlacementOption::End);
+	if (isStart || isEnd) placementOptions.push_back(PlacementOption::Clear);
+	if (placementOptions.empty()) {
+		cancelPlacement(); //nothing can be placed here (a lethal cell, or both already placed elsewhere)
 		return;
 	}
 	isPlacing = true;
 	placingTile = tile;
-
-	//what can go on this tile: always ground and wall; start / end only if there isn't one yet,
-	//or if this tile already is it (so it stays an option, and choosing Ground removes it)
-	placementOptions.clear();
-	placementOptions.push_back(ground);
-	placementOptions.push_back(wall);
-	if (!startExists || tileTypes[tile] == startnode) {
-		placementOptions.push_back(startnode);
-	}
-	if (!endExists || tileTypes[tile] == endnode) {
-		placementOptions.push_back(endnode);
-	}
-
-	//start the preview on what the tile already is (the breadcrumb counts as ground)
-	tiletype current = (tileTypes[tile] == checkpoint) ? ground : tileTypes[tile];
 	placementChoice = 0;
-	for (int i = 0; i < (int)placementOptions.size(); i++) {
-		if (placementOptions[i] == current) {
-			placementChoice = i;
-		}
-	}
 }
 
 void Board::movePlacementChoice(int step) {
@@ -67,40 +46,25 @@ void Board::movePlacementChoice(int step) {
 	placementChoice = ((placementChoice + step) % count + count) % count; //wraps around in both directions
 }
 
-tiletype Board::getPlacementPreview() {
-	if (!isPlacing || placementOptions.empty()) {
-		return ground;
-	}
-	return placementOptions[placementChoice];
-}
-
 void Board::confirmPlacement() {
-	if (!isPlacing) {
+	if (!isPlacing || placementOptions.empty()) {
 		return;
 	}
-	int tile = placingTile;
-	tiletype oldType = tileTypes[tile];
-	tiletype newType = getPlacementPreview();
-
-	//the tile stops being the start / end if it was one
-	if (oldType == startnode && newType != startnode) {
-		startExists = false;
-	}
-	if (oldType == endnode && newType != endnode) {
-		endExists = false;
-	}
-	//and becomes the start / end if that was chosen
-	if (newType == startnode) {
-		startPos = tile;
+	switch (placementOptions[placementChoice]) {
+	case PlacementOption::Start:
+		startPos = placingTile;
 		startExists = true;
-	}
-	if (newType == endnode) {
-		endPos = tile;
+		break;
+	case PlacementOption::End:
+		endPos = placingTile;
 		endExists = true;
+		break;
+	case PlacementOption::Clear:
+		if (startExists && placingTile == startPos) startExists = false;
+		if (endExists && placingTile == endPos) endExists = false;
+		break;
 	}
-
-	tileTypes[tile] = newType;
-	navDirty = true; //a tile changed: rebuild the nav graph and re-plan
+	navDirty = true; //re-plan
 	cancelPlacement();
 }
 

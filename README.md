@@ -1,20 +1,21 @@
-# AStarTileMap
+# AStarTileMap: `costmap` branch
 
-A 20×20 tile-map editor in C++ with SFML. You draw walls, place a start and an end tile, and drive a small
-character around the map. It is a **path-planning visualizer**: start in green, goal in red, every tile the algorithm searched
-in purple, and the planned path in blue. The path is re-planned every time you change the map. You choose the map and the
-algorithm (**A\***, **Dijkstra's**, **BFS** or **DFS**) on the menu screen.
+A* path planning on a **heuristic traversability cost map**, the planning side of the EECE 5554 project (terrain-aware elevation
+mapping and A* path planning for a Unitree Go2 on sand). It mirrors the robot pipeline:
 
-This repo merges my two old Visual Studio projects into one CMake project that builds on Linux (and Windows/macOS):
+```
+elevation map  ─▶  traversability features  ─▶  traversability  ─▶  heuristic cost map  ─▶  A*  ─▶  path
+ ("elevation")      ("slope" "roughness" "step")  ("traversability")   ("cost", inflated)
+```
 
-| Source | Date | What came from it |
-|---|---|---|
-| `TileMap` | Dec 2020 | The base: map editor, character, textures, maps. This is the newer version. |
-| `OriginalTileMap` | Nov 2020 | Nothing extra. It differs from TileMap by only two lines. |
-| iD Tech `C4-Template` / my `newProjectiles` | 2019–20 | `NavGraph` (walkable tiles + their neighbours), now in `src/NavGraph.h` and `Board::recalculateNav()` |
+All of these are **layers of one grid map** (as in grid_map): each stage reads layers and writes a new one. The planner only
+reads `"cost"`, so a map can also start directly at the cost layer.
 
-A\* is implemented in `Board::pathfinding()` as the simplest version of Sebastian Lague's algorithm, with Dijkstra's, BFS and DFS
-next to it in `src/Pathfinding.cpp`. See [Path planning](#path-planning).
+The pipeline and planners live in **`core/`**: plain C++ with no SFML and no ROS, so the folder can later be dropped into a
+ROS 2 node. The SFML app in `src/` only loads, draws and plans by calling `core/`.
+
+This branch replaces `main`'s 20×20 tile map. The tile-map version, its history (TileMap / OriginalTileMap / the iD Tech
+NavGraph) and the evidence of the original A* plans are on the `main` branch and in its README.
 
 ---
 
@@ -25,14 +26,13 @@ A C++17 compiler, CMake ≥ 3.16 and SFML 2.5 or 2.6. On Ubuntu:
 ```bash
 sudo apt install build-essential cmake libsfml-dev
 ```
-(On this machine all of these are already installed.)
 
 ### Quickest: `run.sh`
 ```bash
 ./run.sh
 ```
-This builds (only what changed) and opens the **menu**. `./run.sh dungeon` opens it with "dungeon" already typed in the map name
-box, and `./run.sh --clean` wipes `build/` and rebuilds from scratch first.
+This builds (only what changed) and opens the **menu**. `./run.sh rugged` opens it with "rugged" already in the map name box,
+and `./run.sh --clean` rebuilds from scratch first.
 
 ### From the terminal, step by step
 ```bash
@@ -44,245 +44,168 @@ cmake --build build
 ```bash
 cd build && ./AStarTileMap
 ```
-You can also pass a map name: `./AStarTileMap dungeon` pre-fills the menu's text box.
 
 ### From VS Code
-1. Open this folder in VS Code. Install the recommended **C/C++** and **CMake Tools** extensions if asked.
-2. When CMake Tools asks for a *kit*, pick **GCC**.
-3. Click **Build** in the bottom status bar, then **▷ Run** (or the 🐞 button to debug with breakpoints).
+Open the folder, install the recommended **C/C++** and **CMake Tools** extensions, pick the **GCC** kit, then use **Build** and **▷ Run**.
 
-Run it from inside `build/`, as both setups above do. CMake links `build/Textures`, `build/Font` and `build/maps` back to this
-repo, so maps you save end up in `maps/`.
-
-### Testing the path planning
+### Tests
 ```bash
 cmake --build build && ctest --test-dir build --output-on-failure
 ```
-`tests/test_astar.cpp` compares all four algorithms with a brute-force shortest-path search. It runs on 2,000 random maps, a map
-split by a solid wall (no path), the same map with one gap, and `dungeon`. It checks:
-- Every algorithm finds a path exactly when one exists, using only legal steps.
-- **A\*** and **Dijkstra's** find the cheapest path; **BFS** finds the fewest steps; **DFS** finds a valid path.
-- Every path tile is also marked as searched, and no wall ever is.
-- The board margin: tile ↔ pixel conversion includes the board's origin, and points outside the board give −1.
-- Map names typed in the menu are cleaned (`""` → `default`, `maps/dungeon.txt` → `dungeon`).
+`tests/test_costmap.cpp` tests `core/` only (no SFML):
+- **The grid map:** indices, world positions, layers, and the file round trip (including unknown values).
+- **Every pipeline stage on terrain with known answers:**
+  - flat ground: no slope, roughness or step;
+  - a ramp of known angle: that slope, and no roughness;
+  - a step of known height: found at the edge only;
+  - holes: unknown features.
+- **Scoring rules:** the traversability scoring (ETH rule and the strict variant), Rajput's cost rule, the unknown-cell
+  policies, and the inflation radius.
+- **All four planners against brute force** on 400 random cost maps:
+  - A* and Dijkstra's: the cheapest path;
+  - BFS: the fewest steps;
+  - DFS: a valid path;
+  - none of them ever enters a lethal cell.
+- **`costWeight`:** A* crosses a costly strip when cost doesn't matter and detours around it when it does.
+- **The example maps:** each has a path, flat costs 0 everywhere, and hybrid has no route that avoids rugged terrain.
+
+### Regenerating the example maps
+```bash
+cmake --build build && ./build/generate_maps
+```
+Run it from the repo folder. It rewrites `maps/flat.gridmap`, `rugged`, `dungeon` and `hybrid`, and prints a check of each.
 
 ---
 
-## Screens
+## The maps (in `maps/`)
 
-The program is a small state machine (`enum GameState` in `main.cpp`, in the template's `DEFINE GAMESTATES HERE` spot). It
-**starts on the menu**:
+All are 80 × 80 cells at 0.1 m per cell (8 m × 8 m). An empty map name loads **flat**.
 
+| Map | How it is made | What it shows |
+|---|---|---|
+| **flat** | elevation 0 everywhere, through the pipeline | cost 0 everywhere: the plain-distance baseline |
+| **rugged** | dunes + ripples + five steep hills + fine bumps, through the full pipeline | hills become lethal (stone); the rest has costs between 0 and 0.5; A* trades distance against cost |
+| **dungeon** | your old `maps/dungeon.txt` (20 × 20) scaled ×4. **The cost layer is written directly**: walls lethal, floor 0. Elevation (walls 0.5 m) is for display only. | a map that starts at the cost layer; flat and lethal only |
+| **hybrid** | a dungeon zone (two 0.5 m walls, a zig-zag corridor), then a rocky 0.8 m ridge across the whole map with **three rugged passes**, flat ground below; through the full pipeline | every route must cross rugged terrain (checked). The passes are three options: left roughest (mean cost 0.25), middle 0.17, right smoothest (0.10) but farthest. A* takes the middle one. |
+
+The menu lists every `.gridmap` file in `maps/`. A name that doesn't exist starts a new flat map, and **SAVE & MENU** saves to
+`maps/<name>.gridmap`. (The old 20 × 20 `.txt` maps are still in `maps/` for the main branch; this branch doesn't list them.)
+
+### File format (`.gridmap`, plain text)
 ```
-MENU ──START / Enter──▶ PLAYING ──SAVE & MENU / E──▶ MENU   (saves the map first)
-                           └─────────Esc───────────▶ MENU   (without saving)
+gridmap 1
+size 80 80
+resolution 0.1
+start 6 73          (column row; -1 -1 = none)
+end 73 6
+layer cost
+<80 lines of 80 numbers; nan = unknown>
+layer elevation
+...
 ```
-
-**MENU**
-- **Map name** (text box): click it and type. Empty loads `default`. `dungeon`, `dungeon.txt` and `maps/dungeon` all load the
-  same map, and a name that doesn't exist yet starts a new empty map with a wall border. The saved maps are listed underneath.
-  Note that `a` has no start or end, so no path shows until you place them.
-- **Algorithm** (dropdown): A\*, Dijkstra's, BFS or DFS.
-- **START** (or Enter): loads the map with that algorithm. **Esc** closes the program.
-
-**PLAYING**: the map sits inside an outline with a 40 px margin. The panel on the right shows the map name, the algorithm, the
-result (path length in tiles, path cost, tiles searched, or "No path!"), a controls reminder, and the **SAVE & MENU** button.
+Every layer of the map is saved (`cost`, `elevation`, `slope`, `roughness`, `step`, `traversability`). A file that has an
+`elevation` layer but no `cost` layer gets the whole pipeline run on it when it loads.
 
 ---
 
-## Controls
+## Screens and controls
+
+**MENU:** the map name (text box), the algorithm (dropdown: A*, Dijkstra's, BFS, DFS) and **START**.
+
+**PLAYING:** the map with a 40 px margin, and the side panel: map, algorithm, view, path length (cells and metres), path cost,
+cells searched, and the controls.
 
 | Input | Effect |
 |---|---|
-| **Left click** a tile | Select it. A list appears beside it: **Ground**, **Wall**, **Start**, **End**. Start and End are only listed while they don't exist yet (or on the tile that already is the start / end), so there's never more than one of each. |
-| **↑ / ↓** | Choose from the list. The tile **previews** the highlighted type under its cyan frame. |
-| **Left click** the same tile again, or **Enter** | Place the previewed type. Choosing Ground on the start or end removes it. |
-| **Left click** another tile | Move the selection there |
-| **Right click**, **Backspace** or **Esc** | Unselect without changing anything (Esc only goes back to the menu when nothing is selected) |
-| *(automatic)* | Whenever both a start and an end exist, the chosen algorithm runs. Tiles it searched light **purple** and the path lights **blue**. Editing any tile re-plans. If there is no path, the purple shows how far it got and the panel says "No path!". |
-| **W A S D** | Move the blue character. It accelerates, slides and collides with walls. |
-| **SAVE & MENU** button, or **E** | Save the map to `maps/<name>.txt` and go back to the menu |
-| **Esc** (nothing selected) | Back to the menu **without** saving |
-| Close window | Quit **without** saving |
+| **Left click** a cell | Select it. A list appears beside it: **Start** / **End** (only while missing, never on a lethal cell) and **Clear** (on the start or end cell). |
+| **↑ / ↓** | Choose; the cell previews it |
+| **Left click** the same cell again, or **Enter** | Place it, and the path re-plans |
+| **Right click**, **Backspace** or **Esc** | Unselect (Esc goes back to the menu when nothing is selected) |
+| **V** | Change the view: **Terrain**, **Cost**, **Traversability**, **Slope**, **Roughness**, **Step** |
+| **SAVE & MENU** button, or **E** | Save to `maps/<name>.gridmap` and go back to the menu |
 
-Hovering the mouse over a tile gives it a white frame. Both highlights are drawn on top of the tile's own sprite, so you can always see
-whether it is ground, wall, start, end or path.
+**The views:**
+- **Terrain:** height from the floor sprite's **brown** (lowest point of the map) to the wall sprite's **grey** (highest point).
+- **Cost:** green (0) → yellow → red (0.5).
+- **Traversability:** green (1) → red (0).
+- **Slope / Roughness / Step:** green (0) → red (the critical value).
 
-The previous controls (Space toggled wall/ground, Enter placed the start and then the end, right click toggled a wall) are still in
-the code, **commented out** and marked `OLD controls` in `main.cpp` and `Tile.cpp`. `Board::convertTile()`, which applied them, is
-still there but no longer called.
+In every view, **lethal cells are drawn with the stone wall texture**, unknown cells are black, searched cells are tinted
+purple, and the path is blue.
+
+Editing the map (painting terrain or costs) comes later. For now you place only the start and end.
 
 ---
 
-## What the code does
+## The pipeline (`core/`)
 
 ```
-src/
-  main.cpp          window, the MENU / PLAYING game states, input handling and the game loop (SFML template layout)
-  Tile.h/.cpp       class Board: the grid, drawing, editing, load/save, NavGraph
-  Pathfinding.h     enum PathAlgorithm and the names shown in the menu's dropdown
-  Pathfinding.cpp   the four algorithms: A* (pathfinding), Dijkstra's, BFS, DFS, plus findPath() and getDistance()
-  TilePlacement.cpp placing tiles: select a tile, choose its type with Up / Down, confirm or unselect
-  NavGraph.h        vertex + NavGraph types (from the iD Tech template)
-  character.h/.cpp  class Character: the player you drive with WASD
-  Button.h/.cpp     class Button: a clickable rectangle with centred text
-  TextBox.h/.cpp    class TextBox: a one-line text input (the map name)
-  Dropdown.h/.cpp   class Dropdown: a click-to-open list of options (the algorithm)
-tests/
-  test_astar.cpp    checks all four algorithms against a brute-force search
-assets/Textures/    tile sprites
-assets/Font/        Candal.ttf (the same font as PingPong)
-maps/               saved maps
+core/
+  GridMap.h/.cpp            size, resolution, centred world coordinates, named float layers (NaN = unknown)
+  GridMapFile.h/.cpp        save / load .gridmap
+  CostMapParameters.h       every threshold, weight and radius in one struct (→ a ROS parameter file later)
+  TerrainGenerator.h/.cpp   building blocks for test terrain: flat map, dunes, hills, noise, blocks
+  TerrainFeatures.h/.cpp    computeSlope, computeRoughness, computeStepHeight
+  Traversability.h/.cpp     computeTraversability
+  CostMap.h/.cpp            buildCostMap, inflateCostMap, runCostMapPipeline
+  NavGraph.h                walkable cells and their walkable neighbours (from the iD Tech template, via main)
+  PathPlanner.h/.cpp        A* (pathfindingAstar), Dijkstra's, BFS, DFS on the cost layer
+tools/generate_maps.cpp     builds the example maps
+src/                        the SFML app (menu, Board = map view, Button, TextBox, Dropdown)
 ```
 
-**`main.cpp`**: Opens a 1100×800 window and starts on the **menu**. Pressing START creates a fresh 20×20 `Board` (720×720 px,
-so each tile is 36 px) at a 40 px margin, loads the map named in the text box, and spawns the `Character` on the start tile (or
-the first empty tile). Each frame on the PLAYING screen it:
-1. Reads input. Clicks and the arrow keys call the board's placement functions (`beginPlacement`, `movePlacementChoice`,
-   `confirmPlacement`, `cancelPlacement`); W A S D set flags on the character (`moveUp`…).
-2. If the map changed (`navDirty`), calls `Board::recalculateNav()` to rebuild the navigation graph. Then, if a start and an end
-   both exist, it runs the chosen algorithm (`Board::findPath(algorithm, startPos, endPos)`), which fills `pathTiles` and
-   `searchedTiles`.
-3. Draws the board, the character, the option list beside a selected tile, and the side panel.
+1. **Features** (`TerrainFeatures`). Each one looks at a circular window around the cell:
+   - **slope**: fit a plane `z = ax + by + c` to the window; slope = `atan(√(a² + b²))`, its angle from horizontal;
+   - **roughness**: standard deviation of the heights from that plane;
+   - **step**: highest minus lowest height in the window.
+2. **Traversability** (`Traversability`), from **Wermelinger, Fankhauser, Diethelm, Krüsi, Siegwart & Hutter, "Navigation
+   Planning for Legged Robots in Challenging Terrain" (IROS 2016)** and ETH's `traversability_estimation` package (built on
+   grid_map and elevation_mapping):
+   - each feature scores `1 − value / critical` below its critical value, and 0 at or above it;
+   - `t = w_slope·s_slope + w_roughness·s_roughness + w_step·s_step`, with weights of 1/3 each as in ETH's default
+     configuration;
+   - `zeroIfAnyCritical = true` is a stricter variant in which any critical feature makes the whole cell 0.
+3. **Cost map** (`CostMap`), from **Rajput, *Towards Autonomous Multi-Modal Mobility Morphobot (M4) Robot*, M.S. thesis,
+   Northeastern 2023, Algorithm 1**, ground locomotion only:
+   - `t < 0.5` → **lethal**. On the M4 it meant "fly here"; the Go2 can't, so lethal acts like the old walls.
+   - Otherwise `cost = 1 − t`, between 0 and 0.5.
+   - Unknown cells follow `UnknownPolicy` (lethal by default).
+   - **Inflation:** every cell within `inflationRadius` (0.2 m: the Go2's half-width plus a margin) of a lethal cell becomes
+     lethal.
+4. **Planning** (`PathPlanner`), from **Rajput's Algorithm 2 / eq. 3.8**, ground nodes:
+   - `g(n) = g(c) + h(c, n) + costWeight · cost(n)`;
+   - `h` is the Euclidean distance in cells (eq. 3.1);
+   - lethal cells are left out of the NavGraph. Since every cost is ≥ 0, h never overestimates, so A* stays optimal.
+   - Dijkstra's, BFS and DFS use the same graph. BFS and DFS ignore cost apart from lethal, which shows why they are wrong here.
 
-**`Board` (Tile.h/.cpp)**
-- `tileTypes`: one `tiletype` per tile (`wall`, `ground`, `startnode`, `endnode`, `checkpoint`). Tile `i` is at column `i % 20`, row `i / 20`.
-- `origin`: where the board's top-left corner sits in the window (the margin). `getTileN(x, y)` converts window pixels to a tile
-  index (−1 outside the board); `getTilePos(i)` converts a tile index to the window position of its top-left corner.
-- `drawBoard()` draws an outline around the map, then works in three passes:
-  1. every tile's own sprite;
-  2. the search result: **`searchedTiles` lit purple**, then **`pathTiles` lit blue** on top;
-  3. the selected tile, drawn as the type being previewed, with a cyan frame; then the hover highlight (white).
-- **Placing tiles** (`TilePlacement.cpp`): `beginPlacement(tile)` selects a tile and builds `placementOptions` (ground, wall, plus
-  start / end when allowed). `movePlacementChoice(±1)` moves `placementChoice`, and `confirmPlacement()` writes it to `tileTypes`,
-  updating `startPos` / `endPos` / `startExists` / `endExists` and setting `navDirty` so the path re-plans. `cancelPlacement()`
-  unselects. To add a new tile type, add it to `enum tiletype`, `getTileTypeName()`, `getSpriteFor()` and the list in
-  `beginPlacement()`.
-- `importBoard()` / `exportBoard()` read and write `maps/<name>.txt`. `cleanMapName()` tidies a typed name, and
-  `getSavedMapNames()` lists `maps/`; the menu uses it, and it could later fill a dropdown of saved maps.
-- `getTile(x, y)`, `calcNeighbors()`, `recalculateNav()`: the merged **NavGraph**. Every non-wall tile becomes a `vertex` holding
-  the coordinates of its walkable neighbours (all 8 directions). Look one up with `nav.getVertex(x, y, v)` and read `v.adjacent`.
-- The path planning functions are in `Pathfinding.cpp` (see [Path planning](#path-planning)).
+The grid map uses **grid_map**'s layer approach (Fankhauser & Hutter, "A Universal Grid Map Library", 2016). The elevation map
+it stands in for is Fankhauser et al.'s robot-centric elevation mapping (2014, 2018).
 
-**UI classes**: `Button`, `TextBox` and `Dropdown` each have a `setup()` and a `draw()`, and are fed mouse clicks or events from
-`main.cpp`. They know nothing about maps or algorithms, so they can be reused (for example, a dropdown of saved maps that fills
-the text box).
-
-**`Character` (character.h/.cpp)**: Moves by velocity and acceleration with friction, and is clamped to the board's edges.
-`updateNavigation()` checks the 8 tiles around it and stops movement into walls. As it moves, it turns the ground tile under it into a
-`checkpoint`, which lights **yellow**. It already stores `startPosition` / `endPosition` from the board, but nothing uses them yet.
-
-### Map file format
-`maps/<name>.txt` holds 400 numbers, one per line, in tile order (left→right, top→bottom):
-`0` ground, `1` wall, `2` start, `3` end. The file has no size header, so maps are always 20×20.
-
-### Sprites (`assets/Textures`)
-Every floor tile has a "light" in the middle:
-
-| File | Look | Used for |
+### Parameters (`core/CostMapParameters.h`): starting values to tune
+| Parameter | Value | Note |
 |---|---|---|
-| `floorTile.png` | unlit | ground |
-| `wall.png` | stone | wall |
-| `startTile.png` | green | start |
-| `endTile.png` | red | end |
-| `checkPointTile.png` | yellow | the character's breadcrumb (tile it's standing on) |
-| `emptyTile.png` | dark/black | unused. It would suit "explored" tiles. |
-| `light_blue.png` | blue | **the A\* path** |
-| `light_purple.png` | purple | **tiles A\* searched** (CLOSED set) |
-| `light_red/orange/yellow/green.png` | coloured lights | free, e.g. for the OPEN set or a second agent |
+| `slopeRadius`, `roughnessRadius` | 0.15 m | at least one cell; ETH uses 0.04–0.05 m on finer maps |
+| `stepRadius` | 0.10 m | one cell around the centre, so a smooth slope isn't counted as a step |
+| `criticalSlope` | 0.40 rad (≈ 23°) | lower than ETH's 1.0 rad, as a starting point for sand |
+| `criticalRoughness`, `criticalStep` | 0.05 m, 0.12 m | ETH defaults |
+| weights | 1/3 each | ETH default |
+| `traversabilityThreshold`, `lethalCost` | 0.5, 60 | Rajput |
+| `inflationRadius` | 0.2 m | Go2 half-width (~0.16 m) plus a margin |
+| `costWeight` | 1.0 | how strongly A* avoids costly ground (Rajput uses 1) |
 
 ---
 
-## Path planning
+## Adding things
 
-All four algorithms work on the same navigation graph, return the path start → end (empty if there is none), and record the tiles
-they evaluated in `searchedTiles`, so the purple/blue display works for each.
+| To add | Do this |
+|---|---|
+| **A map** | Write a builder in `tools/generate_maps.cpp` from the `TerrainGenerator` pieces (or set the `cost` layer directly), save it with `saveGridMap`, and run `./build/generate_maps`. |
+| **A terrain piece** | A function in `core/TerrainGenerator` that adds to the `elevation` layer |
+| **A feature** | A `compute…()` in `core/TerrainFeatures` that writes a layer, then use it in `computeTraversability()` with a weight and critical value in `CostMapParameters` |
+| **An algorithm** | Add it to `enum class PathAlgorithm` and `getPathAlgorithmNames()` in `core/PathPlanner.h`, write a `pathfinding…()` in `PathPlanner.cpp`, and add a case to `findPath()`. The menu dropdown picks it up automatically. |
+| **A view** | Add it to `enum class MapView` and `getMapViewNames()` in `src/Tile.h`, and a case in `Board::getCellColor()` |
 
-| Algorithm | Function | How it picks the next tile | Path it finds | Searches |
-|---|---|---|---|---|
-| **A\*** | `pathfinding()` | lowest F = G (cost so far) + H (estimate to the end) | cheapest | few tiles, heads toward the end |
-| **Dijkstra's** | `pathfindingDijkstra()` | lowest G only (A\* without H) | cheapest | more, spreads evenly in every direction |
-| **BFS** | `pathfindingBFS()` | oldest tile found (a queue) | fewest steps (a diagonal counts as one step, so it can cost more) | many, in rings around the start |
-| **DFS** | `pathfindingDFS()` | newest tile found (a stack) | some path, usually long and winding | depends on the map |
-
-On `dungeon`, for example: A\* finds a 31-tile path costing 356 after searching 91 tiles. BFS finds a 31-tile path costing 380
-after searching 186 tiles.
-
-**To add an algorithm:**
-1. Add it to `enum class PathAlgorithm` and `getPathAlgorithmNames()` in `Pathfinding.h`, in the same order.
-2. Write a `Board::pathfinding…()` function in `Pathfinding.cpp`, following the others.
-3. Add a `case` for it in `Board::findPath()`.
-
-The dropdown picks it up automatically.
-
-## A\* details
-
-### Evidence of what I originally planned
-- **The stub was there from day one.** `Board::pathfinding()` was in the very first commit of both repos (OriginalTileMap on 2020‑11‑17,
-  TileMap on 2020‑12‑08). It had `OPEN` / `CLOSED` lists and Lague-style costs: `distBtwnAdjTiles` (10 units straight) and
-  `× sqrt(2)` ("~= 14 units") diagonal. The constructor called it as a test (`pathfinding(getTilePos(1), getTilePos(9))`).
-  It never got past adding the start node to OPEN, and its target was computed from the start position by mistake.
-  The current implementation replaces it.
-- **Start/end tiles exist for a reason.** The `startnode` / `endnode` tile types, `startPos` / `endPos`, and the empty
-  `createStartNode()` / `createEndNode()` were added so the path has endpoints.
-- **The character was meant to follow the path.** `Character` stores `startPosition` / `endPosition` "get from board", and its
-  `updateNavigation()` already builds the same 8-neighbour list A\* needs.
-- **The lit tiles were meant to show the path.** The sprites are sockets that light up green/red/yellow, and the `checkpoint` type marks tiles along a route.
-- **The NavGraph came from the iD Tech template.** The C4-Template's `GameMap` builds a `NavGraph` from 8-neighbour walkable tiles. My
-  `newProjectiles` copy of it adds `start` and `end` tile types, which is the step that became TileMap's start/end nodes.
-- **The real-world goal was a grocery store.** The READMEs say the project was meant to map a grocery store for customer navigation (the EZ-Shop startup), and
-  the `TileMapProjectTemplate*` projects add an unused `Item` class for things placed on tiles.
-
-### Reference
-Sebastian Lague's A\* series: **[A\* Pathfinding (E01: algorithm explanation)](https://www.youtube.com/watch?v=-L-WgKMFuhE)**.
-It explains G cost (distance from the start), H cost (estimated distance to the end), F = G + H, and the open and closed sets.
-The later episodes of the series build the node grid, the implementation and a heap optimisation.
-
-### The algorithm (Lague's version, in short)
-```
-OPEN  = {start}          // tiles still to evaluate
-CLOSED = {}              // tiles already evaluated
-loop:
-    current = tile in OPEN with the lowest F (ties: lowest H)
-    move current from OPEN to CLOSED
-    if current == end: done, retrace the path through parents
-    for each neighbour of current:
-        if neighbour is a wall or in CLOSED: skip
-        newG = current.G + distance(current, neighbour)
-        if newG < neighbour.G or neighbour not in OPEN:
-            neighbour.G = newG
-            neighbour.H = distance(neighbour, end)
-            neighbour.parent = current
-            add neighbour to OPEN if it isn't there
-distance(a, b): dx, dy = |difference| in tiles
-                14*min(dx,dy) + 10*(max(dx,dy) - min(dx,dy))   // diagonal 14, straight 10
-```
-
-### How it maps onto this code
-`Board::pathfinding()` in `src/Pathfinding.cpp` follows the pseudocode above line by line, using the names from my original stub:
-- **Node data:** per-tile arrays `gCost`, `hCost`, `parent` (-1 = none), and `inOpen` / `inClosed` flags. F is `gCost + hCost`.
-- **OPEN:** `openNodes`, a plain list. Each step scans it for the lowest F, with ties going to the lowest H. This is Lague's simplest
-  version, and plenty fast for 400 tiles.
-- **Neighbours:** read from the merged NavGraph (`nav.getVertex(x, y, v)`, then `v.adjacent`), so walls are never considered.
-- **Retrace:** follows `parent` from the end back to the start, then reverses the list.
-- **Searched tiles:** each tile moved into CLOSED is also added to `searchedTiles`, which is drawn purple.
-
-### Possible next steps
-1. **Stop corner cutting.** Like Lague's simple version, a diagonal step is allowed even between two walls that touch at a corner
-   (you can see the path squeeze through such gaps in `dungeon`). For a robot, skip a diagonal step in `calcNeighbors()` when
-   either of the two straight tiles beside it is a wall.
-2. **Show the OPEN set too.** Collect `openNodes` when the search ends and draw them with `light_orange`, so the edge of the search shows.
-3. **Animate the search.** Run one loop iteration per frame instead of the whole search at once, so you can watch the purple spread.
-4. **Bigger maps.** Replace the linear scan of OPEN with a `std::priority_queue`, as in Lague's heap episode.
-5. **Follow the path.** Steer the `Character` toward the centre of the next path tile instead of reading WASD.
-
----
-
-## Fixed
-- Mouse buttons used to be read through `event.key.code` instead of `event.mouseButton.button`. That only worked because both fields
-  sit at the same memory offset. Now `event.mouseButton.button` (also fixed in TileMap and Checkers).
-
-## Known issues (inherited from TileMap, left unchanged)
-- `getTileN()` / `getTilePos()` use `tilesPerCol` where they should use `tilesPerRow`. This is fine while the map is square.
-- `Character::updateNavigation()` doesn't bounds-check its 8 neighbours. On the outer row it reads outside `tileTypes`, which the wall border normally hides.
-- `Character::move()` slows down leftward and rightward motion differently. The negative-x branch adds friction twice and checks `moveUp/moveDown`.
+### Not on this branch
+- **The character** (WASD movement) is a relic of TileMap. It is commented out in `main.cpp` and the CMake file, and its files
+  are kept.
+- **Map editing** (painting terrain or costs) is planned next.

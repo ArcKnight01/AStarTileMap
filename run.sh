@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build (if needed) and run AStarTileMap. It opens on the menu.
-#   ./run.sh            -> menu with an empty map name (START loads "default")
-#   ./run.sh dungeon    -> menu with "dungeon" already typed in the map name box
+#   ./run.sh            -> menu with an empty map name (START loads "flat")
+#   ./run.sh rugged     -> menu with "rugged" already typed in the map name box
 #   ./run.sh --clean    -> wipes build/ first, then builds and runs
 set -euo pipefail
 

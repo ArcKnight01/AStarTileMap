@@ -5,9 +5,11 @@
 #include <SFML/Graphics/Rect.hpp>
 // Include Needed for Text
 #include <SFML/Graphics/Text.hpp>
+#include <iomanip>
 #include <memory>
+#include <sstream>
 #include "Tile.h"
-#include "character.h"
+//CHARACTER (relic, not used on the costmap branch): #include "character.h"
 #include "Button.h"
 #include "TextBox.h"
 #include "Dropdown.h"
@@ -26,9 +28,8 @@ enum GameState {
 //constants here:
 const float windowW = 1100;
 const float windowH = 800;
-const int tilesPerRow = 20;
-const int tilesPerCol = 20;
-const float boardMargin = 40;                              //empty space between the window edge and the map
+//(the map's size in cells now comes from the loaded .gridmap file)
+const float boardMargin = 40;                             //empty space between the window edge and the map
 const float boardSize = windowH - 2 * boardMargin;         //the map is square: 720 x 720
 const float panelLeft = 2 * boardMargin + boardSize;       //the side panel starts right of the map
 const float panelCenterX = (panelLeft + windowW - boardMargin) / 2;
@@ -57,7 +58,7 @@ int main(int argc, char* argv[])
 	Text mapLabel("Map name", font, 24);
 	mapLabel.setPosition(windowW / 2 - 230, 230);
 	TextBox mapNameBox;
-	mapNameBox.setup(font, Vector2f(windowW / 2, 300), Vector2f(460, 60), "default");
+	mapNameBox.setup(font, Vector2f(windowW / 2, 300), Vector2f(460, 60), "flat");
 	if (argc > 1) {
 		mapNameBox.setText(argv[1]);
 	}
@@ -78,9 +79,10 @@ int main(int argc, char* argv[])
 	Text panelText("", font, 19);
 	panelText.setPosition(panelLeft, boardMargin);
 
-	// The board and the character are created when START is pressed (a fresh board for every map)
+	// The board is created when START is pressed (a fresh board for every map)
 	std::unique_ptr<Board> GameBoard;
-	std::unique_ptr<Character> player;
+	//CHARACTER (relic, not used on the costmap branch):
+	//std::unique_ptr<Character> player;
 
 	/* DEFINE VARIABLES HERE */
 	GameState gameState = MENU; // the game starts on the menu
@@ -93,7 +95,7 @@ int main(int argc, char* argv[])
 		for (std::size_t i = 0; i < savedMaps.size(); i++) {
 			list += (i == 0 ? " " : ", ") + savedMaps[i];
 		}
-		list += "\nEmpty loads \"default\"; a new name starts an empty map.";
+		list += "\nEmpty loads \"flat\"; a new name starts a new flat map.";
 		savedMapsText.setString(list);
 		savedMapsText.setPosition(windowW / 2 - 230, 342);
 	};
@@ -102,18 +104,19 @@ int main(int argc, char* argv[])
 	//MENU -> PLAYING: load (or create) the map named in the text box
 	auto startGame = [&]() {
 		algorithm = (PathAlgorithm)algorithmDropdown.getSelectedIndex();
-		player.reset(); //the character points at the board, so remove it before replacing the board
-		GameBoard = std::make_unique<Board>(window, boardSize, boardSize, tilesPerRow, tilesPerCol, Vector2f(boardMargin, boardMargin));
+		//CHARACTER (relic): player.reset(); //the character points at the board, so remove it before replacing the board
+		GameBoard = std::make_unique<Board>(boardSize, boardSize, Vector2f(boardMargin, boardMargin));
 		GameBoard->boardname = mapNameBox.getText();
-		GameBoard->importBoard(GameBoard->boardname); //cleans the name: "" -> "default", "x.txt" -> "x"
-		int initialPos;
-		if (GameBoard->startExists) {
-			initialPos = GameBoard->startPos;
-		}
-		else {
-			initialPos = GameBoard->firstEmptyTile;
-		}
-		player = std::make_unique<Character>(*GameBoard, initialPos);
+		GameBoard->importBoard(GameBoard->boardname); //cleans the name: "" -> "flat", "x.gridmap" -> "x"
+		//CHARACTER (relic, not used on the costmap branch):
+		//int initialPos;
+		//if (GameBoard->startExists) {
+		//	initialPos = GameBoard->startPos;
+		//}
+		//else {
+		//	initialPos = GameBoard->firstEmptyTile;
+		//}
+		//player = std::make_unique<Character>(*GameBoard, initialPos);
 		window.setTitle("Aidan's TileMap - " + GameBoard->boardname);
 		mapNameBox.setActive(false);
 		gameState = PLAYING;
@@ -136,9 +139,10 @@ int main(int argc, char* argv[])
 		Vector2f mouse = window.mapPixelToCoords(Mouse::getPosition(window));
 		window.clear(Color(15, 15, 35));
 		if (gameState == PLAYING) {
-			GameBoard->newClick = false;
-			GameBoard->spacePressed = false;
-			GameBoard->enterPressed = false;
+			//OLD controls (per-frame flags of the tile Board):
+			//GameBoard->newClick = false;
+			//GameBoard->spacePressed = false;
+			//GameBoard->enterPressed = false;
 			GameBoard->leftMousePos = GameBoard->getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
 		}
 		sf::Event event;
@@ -222,18 +226,23 @@ int main(int argc, char* argv[])
 				if (event.key.code == sf::Keyboard::BackSpace) {
 					GameBoard->cancelPlacement();
 				}
-				if (event.key.code == sf::Keyboard::W) {
-					player->moveUp = true;
+				//V: show the next layer (Terrain, Cost, Traversability, Slope, Roughness, Step)
+				if (event.key.code == sf::Keyboard::V) {
+					GameBoard->cycleView();
 				}
-				if (event.key.code == sf::Keyboard::A) {
-					player->moveLeft = true;
-				}
-				if (event.key.code == sf::Keyboard::S) {
-					player->moveDown = true;
-				}
-				if (event.key.code == sf::Keyboard::D) {
-					player->moveRight = true;
-				}
+				//CHARACTER (relic, not used on the costmap branch):
+				//if (event.key.code == sf::Keyboard::W) {
+				//	player->moveUp = true;
+				//}
+				//if (event.key.code == sf::Keyboard::A) {
+				//	player->moveLeft = true;
+				//}
+				//if (event.key.code == sf::Keyboard::S) {
+				//	player->moveDown = true;
+				//}
+				//if (event.key.code == sf::Keyboard::D) {
+				//	player->moveRight = true;
+				//}
 			}
 			if (event.type == sf::Event::KeyReleased) {
 				//OLD controls (Space / Enter key release)
@@ -244,18 +253,19 @@ int main(int argc, char* argv[])
 				//if (event.key.code == sf::Keyboard::Enter) {
 				//	GameBoard->newEnter = false;
 				//}
-				if (event.key.code == sf::Keyboard::W) {
-					player->moveUp = false;
-				}
-				if (event.key.code == sf::Keyboard::A) {
-					player->moveLeft = false;
-				}
-				if (event.key.code == sf::Keyboard::S) {
-					player->moveDown = false;
-				}
-				if (event.key.code == sf::Keyboard::D) {
-					player->moveRight = false;
-				}
+				//CHARACTER (relic, not used on the costmap branch):
+				//if (event.key.code == sf::Keyboard::W) {
+				//	player->moveUp = false;
+				//}
+				//if (event.key.code == sf::Keyboard::A) {
+				//	player->moveLeft = false;
+				//}
+				//if (event.key.code == sf::Keyboard::S) {
+				//	player->moveDown = false;
+				//}
+				//if (event.key.code == sf::Keyboard::D) {
+				//	player->moveRight = false;
+				//}
 			}
 
 			if (event.type == sf::Event::MouseButtonPressed) {
@@ -334,20 +344,14 @@ int main(int argc, char* argv[])
 		//OLD controls: convertTile() applied the Space / Enter edits; tiles are now placed with Board::confirmPlacement()
 		//GameBoard->convertTile();
 		if (GameBoard->navDirty) {
-			//walls/start/end changed (or a map was loaded): rebuild the navigation graph
-			GameBoard->recalculateNav();
-			//re-plan with the chosen algorithm whenever the map changes; searched tiles light up purple, the path blue
-			if (GameBoard->startExists && GameBoard->endExists) {
-				GameBoard->pathTiles = GameBoard->findPath(algorithm, GameBoard->startPos, GameBoard->endPos);
-			}
-			else {
-				GameBoard->pathTiles.clear();
-				GameBoard->searchedTiles.clear();
-			}
+			//start / end changed (or a map was loaded): re-plan on the cost layer with the chosen algorithm;
+			//searched cells are tinted purple, the path is blue
+			GameBoard->replan(algorithm);
 		}
 		GameBoard->drawBoard(window);
-		player->update();
-		player->drawCharacter(window);
+		//CHARACTER (relic, not used on the costmap branch):
+		//player->update();
+		//player->drawCharacter(window);
 
 		//list of what can be placed, next to the selected tile (the highlighted entry is the one previewed on the tile)
 		if (GameBoard->isPlacing) {
@@ -370,37 +374,46 @@ int main(int argc, char* argv[])
 				row.setOutlineColor(chosen ? Color::Cyan : Color(150, 150, 150));
 				row.setOutlineThickness(chosen ? -2.f : -1.f);
 				window.draw(row);
-				Text optionText((chosen ? "> " : "  ") + Board::getTileTypeName(GameBoard->placementOptions[i]), font, 17);
+				Text optionText((chosen ? "> " : "  ") + Board::getPlacementName(GameBoard->placementOptions[i]), font, 17);
 				optionText.setPosition(listX + 6, listY + i * rowH + 3);
 				window.draw(optionText);
 			}
 		}
 
 		//side panel: map, algorithm, result, controls, and the SAVE & MENU button
+		//formats a number with a fixed count of decimals
+		auto toText = [](double value, int decimals) {
+			std::ostringstream out;
+			out << std::fixed << std::setprecision(decimals) << value;
+			return out.str();
+		};
 		std::string info = "Map: " + GameBoard->boardname + (GameBoard->mapIsNew ? " (new)" : "") + "\n";
-		info += "Algorithm: " + getPathAlgorithmName(algorithm) + "\n\n";
+		info += "Algorithm: " + getPathAlgorithmName(algorithm) + "\n";
+		info += "View: " + getMapViewNames()[(int)GameBoard->view] + "  (V)\n\n";
 		if (!(GameBoard->startExists && GameBoard->endExists)) {
-			info += "Place a start and an end:\nclick a tile, then pick\nStart or End\n";
+			info += "Place a start and an end:\nclick a cell, then pick\nStart or End\n";
 		}
 		else if (GameBoard->pathTiles.empty()) {
 			info += "No path!\n";
-			info += "Searched: " + std::to_string(GameBoard->searchedTiles.size()) + " tiles\n";
+			info += "Searched: " + std::to_string(GameBoard->searchedTiles.size()) + " cells\n";
 		}
 		else {
-			int pathCost = 0;
+			//path length in metres: each straight step is one cell, each diagonal step sqrt(2) cells
+			double lengthCells = 0;
 			for (std::size_t i = 1; i < GameBoard->pathTiles.size(); i++) {
-				pathCost += GameBoard->getDistance(GameBoard->pathTiles[i - 1], GameBoard->pathTiles[i]);
+				lengthCells += getHeuristic(GameBoard->map, GameBoard->pathTiles[i - 1], GameBoard->pathTiles[i]);
 			}
-			info += "Path: " + std::to_string(GameBoard->pathTiles.size()) + " tiles\n";
-			info += "Path cost: " + std::to_string(pathCost) + "\n";
-			info += "Searched: " + std::to_string(GameBoard->searchedTiles.size()) + " tiles\n";
+			info += "Path: " + std::to_string(GameBoard->pathTiles.size()) + " cells, "
+				+ toText(lengthCells * GameBoard->map.getResolution(), 1) + " m\n";
+			info += "Path cost: " + toText(GameBoard->pathCost, 1) + "\n";
+			info += "Searched: " + std::to_string(GameBoard->searchedTiles.size()) + " cells\n";
 		}
 		info += "\nControls:\n";
-		info += "Click: select a tile\n";
-		info += "Up / Down: choose type\n";
+		info += "Click: select a cell\n";
+		info += "Up / Down: choose\n";
 		info += "Click again / Enter: place\n";
 		info += "Right-click / Backspace:\n  unselect\n";
-		info += "W A S D: move\n";
+		info += "V: change view\n";
 		info += "Esc: unselect, then menu\n";
 		panelText.setString(info);
 		window.draw(panelText);
