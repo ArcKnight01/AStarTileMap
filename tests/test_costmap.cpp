@@ -213,6 +213,7 @@ int main() {
 		for (const char* name : { "rugged", "dungeon", "hybrid" }) {
 			CHECK(loadGridMap(std::string("maps/") + name + ".gridmap", map, start, end), "maps: %s.gridmap loads", name);
 			CHECK(!pathfindingAstar(map, p, start, end).path.empty(), "maps: %s has a path from its start to its end", name);
+			CHECK(map.getColumns() == 72 && map.getRows() == 72, "maps: %s is 72 x 72 (10 px cells, so the sprites draw cleanly)", name);
 		}
 		//hybrid: every route crosses rugged terrain (blocking all costly cells leaves no path)
 		GridMap zeroOnly = map;

@@ -79,14 +79,15 @@ Run it from the repo folder. It rewrites `maps/flat.gridmap`, `rugged`, `dungeon
 
 ## The maps (in `maps/`)
 
-All are 80 × 80 cells at 0.1 m per cell (8 m × 8 m). An empty map name loads **flat**.
+All are 72 × 72 cells at 0.1 m per cell (7.2 m × 7.2 m), so each cell is 10 px in the app: the wall sprite draws 1:1 and the
+floor sprites at exactly half size. An empty map name loads **flat**.
 
 | Map | How it is made | What it shows |
 |---|---|---|
 | **flat** | elevation 0 everywhere, through the pipeline | cost 0 everywhere: the plain-distance baseline |
 | **rugged** | dunes + ripples + five steep hills + fine bumps, through the full pipeline | hills become lethal (stone); the rest has costs between 0 and 0.5; A* trades distance against cost |
-| **dungeon** | your old `maps/dungeon.txt` (20 × 20) scaled ×4. **The cost layer is written directly**: walls lethal, floor 0. Elevation (walls 0.5 m) is for display only. | a map that starts at the cost layer; flat and lethal only |
-| **hybrid** | a dungeon zone (two 0.5 m walls, a zig-zag corridor), then a rocky 0.8 m ridge across the whole map with **three rugged passes**, flat ground below; through the full pipeline | every route must cross rugged terrain (checked). The passes are three options: left roughest (mean cost 0.25), middle 0.17, right smoothest (0.10) but farthest. A* takes the middle one. |
+| **dungeon** | your old `maps/dungeon.txt` (20 × 20) scaled ×3.6 (each cell takes the old tile it falls in). **The cost layer is written directly**: walls lethal, floor 0. Elevation (walls 0.5 m) is for display only. | a map that starts at the cost layer; flat and lethal only |
+| **hybrid** | a dungeon zone (two 0.5 m walls, a zig-zag corridor), then a rocky 0.8 m ridge across the whole map with **three rugged passes**, flat ground below; through the full pipeline | every route must cross rugged terrain (checked). The passes are three options: left roughest (mean cost 0.26), middle 0.19, right smoothest (0.10) but farthest. A* takes the middle one. |
 
 The menu lists every `.gridmap` file in `maps/`. A name that doesn't exist starts a new flat map, and **SAVE & MENU** saves to
 `maps/<name>.gridmap`. (The old 20 × 20 `.txt` maps are still in `maps/` for the main branch; this branch doesn't list them.)
@@ -94,12 +95,12 @@ The menu lists every `.gridmap` file in `maps/`. A name that doesn't exist start
 ### File format (`.gridmap`, plain text)
 ```
 gridmap 1
-size 80 80
+size 72 72
 resolution 0.1
-start 6 73          (column row; -1 -1 = none)
-end 73 6
+start 5 66          (column row; -1 -1 = none)
+end 66 5
 layer cost
-<80 lines of 80 numbers; nan = unknown>
+<72 lines of 72 numbers; nan = unknown>
 layer elevation
 ...
 ```

@@ -15,8 +15,9 @@
 #include "PathPlanner.h"
 #include "TerrainGenerator.h"
 
-static const int SIZE = 80;           //cells per side
-static const double RESOLUTION = 0.1; //m per cell -> an 8 m x 8 m map
+//72 cells: the app's 720 px map gives 10 px cells, so the 10 px wall sprite draws 1:1 and the 20 px floor sprites at half size
+static const int SIZE = 72;           //cells per side
+static const double RESOLUTION = 0.1; //m per cell -> a 7.2 m x 7.2 m map
 //how rugged the rugged map is (metres)
 static double RUGGED_DUNES = 0.06, RUGGED_RIPPLES = 0.02, RUGGED_NOISE = 0.008;
 
@@ -46,11 +47,11 @@ static GridMap buildRugged(const CostMapParameters& parameters) {
 	GridMap map = createFlatMap(SIZE, SIZE, RESOLUTION);
 	addDunes(map, RUGGED_DUNES, 2.4, 3.0, 0.6);    //long rolling dunes
 	addDunes(map, RUGGED_RIPPLES, 1.0, 1.2, 1.7);  //shorter ripples on top
-	addHill(map, 22, 30, 0.45, 0.35);              //steep hills: lethal cores with costly slopes around them
-	addHill(map, 52, 18, 0.35, 0.45);
-	addHill(map, 40, 52, 0.50, 0.40);
-	addHill(map, 64, 60, 0.30, 0.50);
-	addHill(map, 14, 64, 0.30, 0.35);
+	addHill(map, 20, 27, 0.45, 0.35);              //steep hills: lethal cores with costly slopes around them
+	addHill(map, 47, 16, 0.35, 0.45);
+	addHill(map, 36, 47, 0.50, 0.40);
+	addHill(map, 58, 54, 0.30, 0.50);
+	addHill(map, 13, 58, 0.30, 0.35);
 	addNoise(map, RUGGED_NOISE, 7);                //surface roughness everywhere
 	runCostMapPipeline(map, parameters);
 	return map;
@@ -66,24 +67,25 @@ static bool buildDungeon(const CostMapParameters& parameters, GridMap& map, int&
 		std::printf("maps/dungeon.txt not found or not 20x20\n");
 		return false;
 	}
-	const int scale = SIZE / 20; //each old tile becomes scale x scale cells
+	//each old tile covers SIZE / 20 cells per side (3.6 for 72): every cell takes the old tile it falls in
 	map = createFlatMap(SIZE, SIZE, RESOLUTION);
 	map.addLayer("cost", 0.f);
 	std::vector<float>& elevation = map.getLayer("elevation");
 	std::vector<float>& cost = map.getLayer("cost");
-	start = end = -1;
-	for (int tile = 0; tile < 400; tile++) {
-		int tileColumn = tile % 20, tileRow = tile / 20;
-		for (int dy = 0; dy < scale; dy++) {
-			for (int dx = 0; dx < scale; dx++) {
-				int index = map.getIndex(tileColumn * scale + dx, tileRow * scale + dy);
-				if (tiles[tile] == 1) {
-					elevation[index] = 0.5f;               //walls drawn as 0.5 m blocks
-					cost[index] = parameters.lethalCost;   //and lethal
-				}
+	for (int row = 0; row < SIZE; row++) {
+		for (int column = 0; column < SIZE; column++) {
+			int tile = (row * 20 / SIZE) * 20 + column * 20 / SIZE;
+			if (tiles[tile] == 1) {
+				int index = map.getIndex(column, row);
+				elevation[index] = 0.5f;               //walls drawn as 0.5 m blocks
+				cost[index] = parameters.lethalCost;   //and lethal
 			}
 		}
-		int centre = map.getIndex(tileColumn * scale + scale / 2, tileRow * scale + scale / 2);
+	}
+	//the start and end go in the cell at the centre of their old tile
+	start = end = -1;
+	for (int tile = 0; tile < 400; tile++) {
+		int centre = map.getIndex(((tile % 20) * 2 + 1) * SIZE / 40, ((tile / 20) * 2 + 1) * SIZE / 40);
 		if (tiles[tile] == 2) start = centre;
 		if (tiles[tile] == 3) end = centre;
 	}
@@ -93,19 +95,19 @@ static bool buildDungeon(const CostMapParameters& parameters, GridMap& map, int&
 
 //the three passes through the hybrid map's ridge: first and last column, and how rugged each one is
 struct Pass { int column0, column1; double dunes, noise; };
-static const int RIDGE_ROW0 = 40, RIDGE_ROW1 = 52;
+static const int RIDGE_ROW0 = 36, RIDGE_ROW1 = 47;
 static const Pass PASSES[3] = {
-	{  4, 18, 0.030, 0.014 }, //left: roughest
-	{ 33, 47, 0.020, 0.010 }, //middle
-	{ 62, 76, 0.010, 0.006 }, //right: smoothest
+	{  4, 16, 0.030, 0.014 }, //left: roughest
+	{ 30, 42, 0.020, 0.010 }, //middle
+	{ 56, 68, 0.010, 0.006 }, //right: smoothest
 };
 
 static GridMap buildHybrid(const CostMapParameters& parameters) {
 	GridMap map = createFlatMap(SIZE, SIZE, RESOLUTION);
-	//dungeon zone (rows 0-37): two 0.5 m walls make a zig-zag corridor down from the top-left room
-	addBlock(map, 0, 11, 57, 12, 0.5);   //wall with a gap on the right
-	addBlock(map, 22, 25, 79, 26, 0.5);  //wall with a gap on the left
-	//a ridge across the whole map (rows 40-52), 0.8 m high, except in the three passes
+	//dungeon zone (rows 0-33): two 0.5 m walls make a zig-zag corridor down from the top-left room
+	addBlock(map, 0, 10, 51, 11, 0.5);   //wall with a gap on the right
+	addBlock(map, 20, 22, 71, 23, 0.5);  //wall with a gap on the left
+	//a ridge across the whole map (rows 36-47), 0.8 m high, except in the three passes
 	for (int column = 0; column < SIZE; column++) {
 		bool inPass = false;
 		for (const Pass& pass : PASSES) {
@@ -177,12 +179,12 @@ int main() {
 	CostMapParameters parameters;
 
 	GridMap flat = buildFlat(parameters);
-	int flatStart = flat.getIndex(6, 73), flatEnd = flat.getIndex(73, 6);
+	int flatStart = flat.getIndex(5, 66), flatEnd = flat.getIndex(66, 5);
 	printSummary("flat", flat, parameters, flatStart, flatEnd);
 	saveGridMap("maps/flat.gridmap", flat, flatStart, flatEnd);
 
 	GridMap rugged = buildRugged(parameters);
-	int ruggedStart = rugged.getIndex(6, 73), ruggedEnd = rugged.getIndex(73, 6);
+	int ruggedStart = rugged.getIndex(5, 66), ruggedEnd = rugged.getIndex(66, 5);
 	printSummary("rugged", rugged, parameters, ruggedStart, ruggedEnd);
 	saveGridMap("maps/rugged.gridmap", rugged, ruggedStart, ruggedEnd);
 
@@ -194,7 +196,7 @@ int main() {
 	}
 
 	GridMap hybrid = buildHybrid(parameters);
-	int hybridStart = hybrid.getIndex(6, 5), hybridEnd = hybrid.getIndex(40, 72);
+	int hybridStart = hybrid.getIndex(5, 5), hybridEnd = hybrid.getIndex(36, 65);
 	printSummary("hybrid", hybrid, parameters, hybridStart, hybridEnd);
 	checkHybrid(hybrid, parameters, hybridStart, hybridEnd);
 	saveGridMap("maps/hybrid.gridmap", hybrid, hybridStart, hybridEnd);
