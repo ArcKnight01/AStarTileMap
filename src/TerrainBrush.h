@@ -11,7 +11,7 @@
 //                                    a Gaussian weight (below), then the cost map is rebuilt around those cells
 //                                    and the path is planned again
 //
-// How high a painted patch is sets the cost of its sides. Measured with one click of the Gaussian brush (below) on a
+// How high a painted patch is sets the cost of its sides. Measured with one click at 100 % strength of the Gaussian brush (below) on a
 // flat map, default CostMapParameters, 0.1 m cells (cN = worst walkable cost, L = the patch is lethal):
 //   brush          0.02 m   0.05 m   0.08 m   0.10 m   0.15 m   0.50 m
 //   1 cell         c0.17    c0.42    L        L        L        L
@@ -68,14 +68,22 @@ inline std::vector<std::string> getBrushNames() {
 	return { "1 cell", "3 x 3 cells", "5 x 5 cells", "9 x 9 cells" };
 }
 
-// The brush is a Gaussian: each brushed cell moves toward the chosen height by its kernel weight,
-//   z  <-  z + w * ( target - z ),     w = exp( -d^2 / ( 2 sigma^2 ) ),     sigma = brushSigmaPerWidth * width
-// so the centre (w = 1) reaches the target and the height falls off smoothly toward the brush's edge: a patch is a
-// smooth mound or hollow instead of a block with a vertical step around it. Moving toward the target (instead of adding
-// to the height) means dragging over the same cells again settles on the target instead of piling up.
+// The brush is a Gaussian: each brushed cell moves part of the way toward the chosen height,
+//   z  <-  z + strength * w * ( target - z ),     w = exp( -d^2 / ( 2 sigma^2 ) ),     sigma = brushSigmaPerWidth * width
+// so the height falls off smoothly toward the brush's edge: a patch is a smooth mound or hollow instead of a block with
+// a vertical step around it. strength (Left / Right, 10 % .. 100 %) is how far one click goes: at 100 % the centre
+// (w = 1) reaches the target at once; at 30 % each click closes 30 % of the gap, so clicking again and again with
+// Ground flattens a mound slowly (the centre is within 3 % of flat after 10 clicks: 0.7^10 = 0.03). Moving toward the
+// target (instead of adding to the height) means repeated clicks and drags settle on the target instead of piling up.
+// (was: z <- z + w * ( target - z ), a full step every click)
 // The kernels are computed once per brush width (Board::brushKernels) and only looked up while painting.
 // sigma = width / 4 leaves exp( -2 ) ~ 0.14 at the middle of the brush's edge; a 1-cell brush is a single weight of 1.
 const float brushSigmaPerWidth = 0.25f;
+// brush strength: how far one click moves a cell toward the target, in percent (Left / Right change it by the step)
+const int brushStrengthDefault = 30;
+const int brushStrengthStep = 10;
+const int brushStrengthLowest = 10;
+const int brushStrengthHighest = 100;
 
 /**
  * Compute the Gaussian weight at a distance from the brush centre.

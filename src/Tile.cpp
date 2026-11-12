@@ -32,6 +32,7 @@ static const float GROUND_LEVEL = 170.f;
 
 void Board::loadSprites() {
 	wallTexture.loadFromFile("Textures/wall.png");
+	pitTexture.loadFromFile("Textures/pit.png");
 	sf::Image floor;
 	floor.loadFromFile("Textures/floorTile.png");
 	sf::Vector2u size = floor.getSize();
@@ -147,6 +148,7 @@ void Board::importBoard(string& name) {
 	startExists = (startPos >= 0);
 	endExists = (endPos >= 0);
 	updateGeometry();
+	updatePitCells();
 	navDirty = true;
 }
 
@@ -279,10 +281,10 @@ void Board::drawBoard(sf::RenderWindow& window) {
 	if (previewing && preview == PlacementOption::Start) lights[placingTile] = StartLight;
 	if (previewing && preview == PlacementOption::End) lights[placingTile] = EndLight;
 
-	//every cell is one sprite at cell size: lethal cells the stone wall; the others the floor, its brown recoloured by
+	//every cell is one sprite at cell size: lethal cells the stone wall or the pit (updatePitCells); the others the floor, its brown recoloured by
 	//the view (getGroundColor), with the cell's lights on top. One vertex array per texture, so 6400 cells stay fast.
 	const std::vector<float>& cost = map.getLayer("cost");
-	sf::VertexArray wallCells(sf::Quads), groundCells(sf::Quads);
+	sf::VertexArray wallCells(sf::Quads), pitCellQuads(sf::Quads), groundCells(sf::Quads);
 	sf::VertexArray lightCells[5] = { sf::VertexArray(sf::Quads), sf::VertexArray(sf::Quads), sf::VertexArray(sf::Quads),
 		sf::VertexArray(sf::Quads), sf::VertexArray(sf::Quads) };
 	auto addQuad = [&](sf::VertexArray& cells, int i, sf::Color color, float textureSize) {
@@ -294,9 +296,13 @@ void Board::drawBoard(sf::RenderWindow& window) {
 	};
 	const float spriteSize = (float)groundTexture.getSize().x; //20
 	const float wallSize = (float)wallTexture.getSize().x;     //10
+	const float pitSize = (float)pitTexture.getSize().x;       //10
+	bool hasPitCells = (int)pitCells.size() == map.getCellCount();
 	for (int i = 0; i < map.getCellCount(); i++) {
 		if (isLethal(cost[i], parameters) && lights[i] == NoLight) {
-			addQuad(wallCells, i, sf::Color::White, wallSize);
+			//addQuad(wallCells, i, sf::Color::White, wallSize); (was: every lethal cell a wall)
+			if (hasPitCells && pitCells[i]) addQuad(pitCellQuads, i, sf::Color::White, pitSize);
+			else addQuad(wallCells, i, sf::Color::White, wallSize);
 			continue;
 		}
 		//groundTexture's average pixel is GROUND_LEVEL, so this colour makes the average pixel the ground colour
@@ -306,6 +312,7 @@ void Board::drawBoard(sf::RenderWindow& window) {
 		if (lights[i] != NoLight) addQuad(lightCells[lights[i]], i, sf::Color::White, spriteSize);
 	}
 	window.draw(wallCells, &wallTexture);
+	window.draw(pitCellQuads, &pitTexture);
 	window.draw(groundCells, &groundTexture);
 	window.draw(lightCells[SearchedLight], &searchedLightTexture);
 	window.draw(lightCells[PathLight], &pathLightTexture);
@@ -327,6 +334,65 @@ void Board::drawBoard(sf::RenderWindow& window) {
 	}
 	if (!(previewing && leftMousePos == placingTile)) {
 		drawHighlight(leftMousePos, sf::Color::White, 40, 1.5f);
+	}
+}
+
+void Board::updatePitCells() {
+
+
+	// pseudo-code:
+	// for each connected area A of lethal cells (8 neighbours), found by a flood fill:
+	//     B = walkable cells next to A (4 neighbours)
+	//     pit( A ) = mean elevation( A ) < mean elevation( B )      (known elevations only)
+	// no elevation layer, or no known elevations in A or B -> wall
+
+
+	int cellCount = map.getCellCount();
+	pitCells.assign(cellCount, false);
+	if (!map.hasLayer("elevation")) {
+		return;
+	}
+	const std::vector<float>& cost      = map.getLayer("cost");
+	const std::vector<float>& elevation = map.getLayer("elevation");
+	std::vector<bool> visited(cellCount, false);
+
+
+	for (int seed = 0; seed < cellCount; seed++) {
+		if (visited[seed] || !isLethal(cost[seed], parameters)) continue;
+
+
+		//flood fill the lethal area that contains seed, summing its elevation and that of the walkable cells around it
+		std::vector<int> area, stack = { seed };
+		double areaSum = 0, borderSum = 0;
+		int areaKnown = 0, borderKnown = 0;
+		std::vector<int> borderCells;
+		visited[seed] = true;
+		while (!stack.empty()) {
+			int cell = stack.back();
+			stack.pop_back();
+			area.push_back(cell);
+			if (!GridMap::isUnknown(elevation[cell])) { areaSum += elevation[cell]; areaKnown++; }
+			int column = map.getColumn(cell), row = map.getRow(cell);
+			for (int dy = -1; dy <= 1; dy++) {
+				for (int dx = -1; dx <= 1; dx++) {
+					if ((dx == 0 && dy == 0) || !map.isInside(column + dx, row + dy)) continue;
+					int neighbour = map.getIndex(column + dx, row + dy);
+					if (isLethal(cost[neighbour], parameters)) {
+						if (!visited[neighbour]) { visited[neighbour] = true; stack.push_back(neighbour); }
+					}
+					else if (dx == 0 || dy == 0) {
+						borderCells.push_back(neighbour); //a walkable cell beside the area (may be counted twice; fine for a mean)
+					}
+				}
+			}
+		}
+		for (int cell : borderCells) {
+			if (!GridMap::isUnknown(elevation[cell])) { borderSum += elevation[cell]; borderKnown++; }
+		}
+
+
+		bool isPit = areaKnown > 0 && borderKnown > 0 && areaSum / areaKnown < borderSum / borderKnown;
+		for (int cell : area) pitCells[cell] = isPit;
 	}
 }
 

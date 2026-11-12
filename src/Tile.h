@@ -115,15 +115,16 @@ public:
 	 */
 	void buildBrushKernels();
 	/**
-	 * Move the elevation of every cell under a square Gaussian brush centred on a cell toward a height:
-	 * z <- z + w * ( elevation - z ), with w the brush kernel's weight for that cell (1 at the centre).
+	 * Move the elevation of every cell under a square Gaussian brush centred on a cell part of the way toward a height:
+	 * z <- z + strength * w * ( elevation - z ), with w the brush kernel's weight for that cell (1 at the centre).
 	 *
 	 * @param tile        Index of the cell under the mouse (row * columns + column).
-	 * @param elevation   Target height of the brush, in metres (reached at the centre).
+	 * @param elevation   Target height of the brush, in metres.
 	 * @param brushWidth  Side of the square brush, in cells (one of getBrushWidths()). Cells outside the map are skipped.
+	 * @param strength    Fraction of the gap closed at the centre per call, 0 .. 1 (1: the centre reaches the target).
 	 * @return            Nothing. The brushed cells are added to terrainEditedTiles.
 	 */
-	void setTerrainHeight(int tile, float elevation, int brushWidth);
+	void setTerrainHeight(int tile, float elevation, int brushWidth, float strength);
 	/**
 	 * Rebuild the derived layers (slope, roughness, step, traversability, cost) around the cells in terrainEditedTiles.
 	 *
@@ -153,12 +154,27 @@ public:
 	// Every cell sprite is the same brown floor plus coloured lights. At load time each is split in two:
 	//  groundTexture: the floor's brown as brightness only (grey), so a vertex colour can recolour it per cell
 	//  light textures: only the pixels where that sprite differs from floorTile.png (its lights), the rest transparent
-	sf::Texture wallTexture;          //stone (wall.png, 10 x 10): lethal cells
+	sf::Texture wallTexture;          //stone (wall.png, 10 x 10): lethal cells that stand above the ground around them
+	sf::Texture pitTexture;           //a dark hollow (pit.png, 10 x 10): lethal cells that lie below the ground around them
 	sf::Texture groundTexture;        //from floorTile.png
 	sf::Texture startLightTexture;    //startTile.png: green lights
 	sf::Texture endLightTexture;      //endTile.png: red lights
 	sf::Texture pathLightTexture;     //light_blue.png: the path
 	sf::Texture searchedLightTexture; //light_purple.png: cells the algorithm searched
+	// --- lethal cells: wall or pit ---
+	// A lethal cell is lethal because of its slope / step / roughness (or the inflation around such cells), which a
+	// raised block and a dug hole both cause, so the cost alone can't tell them apart. Each connected area of lethal
+	// cells is a pit when its mean elevation is below the mean elevation of the walkable cells bordering it, and a wall
+	// otherwise (also when the map has no elevation, like the dungeon). Deciding per area means the inflated ring around a
+	// hole, which is at ground level, is drawn as part of the pit.
+	std::vector<bool> pitCells; //true for the lethal cells drawn as a pit
+	/**
+	 * Decide for every lethal cell whether it is drawn as a wall or a pit, from the elevation of its connected lethal area
+	 * against the walkable cells bordering that area (8-connected areas, 4-connected border).
+	 *
+	 * @return  Nothing. Fills pitCells. Called when a map loads and after updateCostMap().
+	 */
+	void updatePitCells();
 	//what colour the brown of a cell is drawn in (Terrain view: brown -> darker -> grey; other views: their heat colour)
 	sf::Color getGroundColor(int index);
 

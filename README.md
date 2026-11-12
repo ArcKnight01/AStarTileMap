@@ -143,8 +143,9 @@ cells searched, and the controls.
 |---|---|
 | **Algorithm** dropdown | Change the algorithm (A*, Dijkstra's, BFS, DFS); the path re-plans at once. The menu's choice is where it starts. |
 | **Left click** dropdown | **Place start / end** (the rows below) or **Set terrain** |
-| *Set terrain:* **left click** or **drag** | The cells under the brush (outlined in cyan) move toward the brush **height** by a Gaussian weight (1 at the centre, ~0.14 at the edge), so a patch is a smooth mound or hollow; the slope, roughness, step, traversability and cost are rebuilt around it and the path re-plans. **Height** presets: hollow −0.05 m, dip −0.02 m, ground 0, bump +0.02 m, mound +0.05 m (walkable with every brush), wall +0.50 m (lethal). **Brush**: 1, 3 × 3, 5 × 5 or 9 × 9 cells; a wider brush is a gentler slope, so it can go higher before it turns lethal (about 0.05 m for 3 × 3, 0.10 m for 9 × 9). Saved with the map. |
+| *Set terrain:* **left click** or **drag** | The cells under the brush (outlined in cyan) move part of the way toward the brush **height**: `z ← z + strength · w · (height − z)`, with a Gaussian weight `w` (1 at the centre, ~0.14 at the edge), so a patch is a smooth mound or hollow and clicking again keeps closing the gap (Ground at 30 % flattens a mound a step at a time); the slope, roughness, step, traversability and cost are rebuilt around it and the path re-plans. **Height** presets: hollow −0.05 m, dip −0.02 m, ground 0, bump +0.02 m, mound +0.05 m (walkable with every brush), wall +0.50 m (lethal). **Brush**: 1, 3 × 3, 5 × 5 or 9 × 9 cells; a wider brush is a gentler slope, so it can go higher before it turns lethal (about 0.05 m for 3 × 3, 0.10 m for 9 × 9). Saved with the map. |
 | *Set terrain:* **↑ / ↓** | Raise / lower the brush height by 1 cm (**Shift**: 5 cm); about 0.1 of cost per cm. The panel shows the height. |
+| *Set terrain:* **← / →** | Brush **strength**, 10 % to 100 % (default 30 %): how far one click goes toward the height. 100 % reaches it in one click. |
 | *Place start / end:* **left click** a cell | Select it. A list appears beside it: **Start** / **End** on any walkable cell (shown as **Move start** / **Move end** when they already exist), or **Clear** on the start or end cell. Lethal cells can't be selected. |
 | *Place start / end:* **↑ / ↓** | Choose; the cell previews it |
 | **Left click** the same cell again, or **Enter** | Place it, and the path re-plans |
@@ -152,7 +153,7 @@ cells searched, and the controls.
 | **V**, or the view dropdown | Change the view: **Terrain**, **Elevation**, **Cost**, **Traversability**, **Slope**, **Roughness**, **Step** |
 | **SAVE & MENU** button, or **E** | Save to `maps/<name>.gridmap` and go back to the menu |
 
-**The views.** Every cell is drawn with your sprites at cell size, as on `main`: lethal cells are the stone wall, every other
+**The views.** Every cell is drawn with your sprites at cell size, as on `main`: lethal cells are the stone wall, or a dark **pit** (`pit.png`) when their lethal area lies below the walkable ground around it, every other
 cell is the floor sprite with its lights. Only the floor's **brown** changes with the view; the lights stay as indicators
 (green start, red end, blue path, purple searched). At load time each sprite is split into the floor's brown (kept as
 brightness, so it can be recoloured per cell) and its lights (the pixels that differ from `floorTile.png`).

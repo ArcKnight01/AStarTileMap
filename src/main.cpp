@@ -135,6 +135,8 @@ int main(int argc, char* argv[])
 	//the height the brush paints (m): picking a preset in the Height dropdown sets it, Up / Down change it in 0.01 m
 	//steps (Shift: 0.05 m), so heights between the presets can be painted too
 	float brushElevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation;
+	//how far one click moves the brushed cells toward brushElevation, in percent (Left / Right; TerrainBrush.h)
+	int brushStrength = brushStrengthDefault;
 
 	//the brush height as shown in the panel, e.g. "+0.07 m"
 	auto getBrushElevationText = [&]() {
@@ -152,7 +154,7 @@ int main(int argc, char* argv[])
 		};
 		if (clickMode == ClickMode::SetTerrain) {
 			dropdowns.push_back({ "Height: " + getBrushElevationText() + " (Up/Down)", &terrainHeightDropdown });
-			dropdowns.push_back({ "Brush:", &brushDropdown });
+			dropdowns.push_back({ "Brush: " + std::to_string(brushStrength) + "% (Left/Right)", &brushDropdown });
 		}
 		return dropdowns;
 	};
@@ -343,7 +345,7 @@ int main(int argc, char* argv[])
 		}
 		//float elevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation; (was the preset only)
 		int brushWidth = getBrushWidths()[brushDropdown.getSelectedIndex()];
-		GameBoard->setTerrainHeight(tile, brushElevation, brushWidth);
+		GameBoard->setTerrainHeight(tile, brushElevation, brushWidth, brushStrength / 100.f);
 		lastPaintedTile = tile;
 	};
 
@@ -473,6 +475,13 @@ int main(int argc, char* argv[])
 				if (event.key.code == sf::Keyboard::Down) {
 					if (clickMode == ClickMode::SetTerrain) changeBrushElevation(-heightStep);
 					else GameBoard->movePlacementChoice(+1);
+				}
+				//Set terrain: Left / Right make the brush weaker / stronger (how far one click goes toward the height)
+				if (clickMode == ClickMode::SetTerrain && event.key.code == sf::Keyboard::Left) {
+					brushStrength = std::max(brushStrengthLowest, brushStrength - brushStrengthStep);
+				}
+				if (clickMode == ClickMode::SetTerrain && event.key.code == sf::Keyboard::Right) {
+					brushStrength = std::min(brushStrengthHighest, brushStrength + brushStrengthStep);
 				}
 				if (event.key.code == sf::Keyboard::Enter) {
 					GameBoard->confirmPlacement();
@@ -703,8 +712,9 @@ int main(int argc, char* argv[])
 		info += "\nControls:\n";
 		if (clickMode == ClickMode::SetTerrain) {
 			info += "Click / drag: set height\n";
-			info += "Up / Down: height +-1 cm\n";
-			info += "  (Shift: +-5 cm)\n";
+			//info += "Up / Down: height +-1 cm\n"; info += "  (Shift: +-5 cm)\n"; (two lines; shortened to fit Left / Right)
+			info += "Up/Down: height (Shift x5)\n";
+			info += "Left/Right: strength\n";
 			info += "V: view, Esc: menu\n";
 			//info += "V: change view\n"; info += "Esc: menu\n"; (one line now, to fit the panel)
 		}

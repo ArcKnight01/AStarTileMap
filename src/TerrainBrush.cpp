@@ -18,16 +18,17 @@ void Board::buildBrushKernels() {
 	}
 }
 
-void Board::setTerrainHeight(int tile, float elevation, int brushWidth) {
+void Board::setTerrainHeight(int tile, float elevation, int brushWidth, float strength) {
 
 
 	// pseudo-code:
 	// (c0, r0) = cell of tile;  k = ( brushWidth - 1 ) / 2;  K = brushKernels[ brushWidth ]
 	// for every cell (c, r) with |c - c0| <= k and |r - r0| <= k inside the map:
 	//     w = K[ r - r0 + k ][ c - c0 + k ]
-	//     elevation(c, r) = elevation(c, r) + w * ( elevation - elevation(c, r) );  remember (c, r) as edited
+	//     elevation(c, r) = elevation(c, r) + strength * w * ( elevation - elevation(c, r) );  remember (c, r) as edited
 	//
-	// (was: elevation(c, r) = elevation for every cell of the square, which left a vertical step around the patch)
+	// (was: elevation(c, r) = elevation for every cell of the square, which left a vertical step around the patch;
+	//  then z + w * ( elevation - z ), a full step every click)
 
 
 	if (!map.hasLayer("elevation")) {
@@ -47,7 +48,7 @@ void Board::setTerrainHeight(int tile, float elevation, int brushWidth) {
 			float weight = kernel[(row - centerRow + halfWidth) * brushWidth + (column - centerColumn + halfWidth)];
 			//an unknown (NaN) height has nothing to blend from, so it is set to the target
 			float current = GridMap::isUnknown(heights[index]) ? elevation : heights[index];
-			heights[index] = current + weight * (elevation - current);
+			heights[index] = current + strength * weight * (elevation - current);
 			terrainEditedTiles.push_back(index);
 		}
 	}
@@ -105,7 +106,8 @@ void Board::updateCostMap() {
 
 
 	terrainEditedTiles.clear();
-	navDirty = true; //the cost changed: re-plan
+	updatePitCells(); //a lethal area may have appeared, grown, or turned from a wall into a pit
+	navDirty = true;  //the cost changed: re-plan
 }
 
 void Board::drawTerrainBrush(sf::RenderWindow& window, int tile, int brushWidth) {
