@@ -12,7 +12,8 @@ All of these are **layers of one grid map** (as in grid_map): each stage reads l
 reads `"cost"`, so a map can also start directly at the cost layer.
 
 The pipeline and planners live in **`core/`**: plain C++ with no SFML and no ROS, so the folder can later be dropped into a
-ROS 2 node. The SFML app in `src/` only loads, draws and plans by calling `core/`.
+ROS 2 node. The SFML app in `src/` only loads, draws and plans by calling `core/`. **[ROS2_PLAN.md](ROS2_PLAN.md)** is the plan for that
+ROS 2 package: nodes, topics, parameters, and what `core/` needs first.
 
 This branch replaces `main`'s 20×20 tile map. The tile-map version, its history (TileMap / OriginalTileMap / the iD Tech
 NavGraph) and the evidence of the original A* plans are on the `main` branch and in its README.
