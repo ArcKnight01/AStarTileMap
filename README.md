@@ -79,8 +79,8 @@ Run it from the repo folder. It rewrites `maps/flat.gridmap`, `rugged`, `dungeon
 
 ## The maps (in `maps/`)
 
-All are 72 × 72 cells at 0.1 m per cell (7.2 m × 7.2 m), so each cell is 10 px in the app: the wall sprite draws 1:1 and the
-floor sprites at exactly half size. An empty map name loads **flat**.
+All are 72 × 72 cells at 0.1 m per cell (7.2 m × 7.2 m). On a screen up to 1440 px tall that is 10 px per cell (a 720 px map):
+the 10 px wall sprite draws 1:1 and the floor sprites at exactly half size. An empty map name loads **flat**.
 
 | Map | How it is made | What it shows |
 |---|---|---|
@@ -113,10 +113,13 @@ Every layer of the map is saved (`cost`, `elevation`, `slope`, `roughness`, `ste
 
 **MENU:** the map name (text box), the algorithm (dropdown: A*, Dijkstra's, BFS, DFS), the **size of a new map** (cells per
 side, 5–180, at 0.1 m per cell) and **START**. The size is only used when the name is a new map; a saved map keeps its own size.
-The default is **36**: the map is 720 px wide, so each cell is exactly 20 px and the 20 × 20 sprites are drawn 1:1. 72 draws
-them at exactly half size (10 px) and 18 at double size (40 px); other sizes work but scale the sprites unevenly.
+The default is **36** (3.6 m): it fits a 1080p screen at 20 px cells, so the 20 × 20 sprites are drawn 1:1.
 
-**PLAYING:** the map with a 40 px margin, and the side panel: map, size, algorithm, the **view dropdown**, path length (cells
+**The window resizes to the map.** Each cell gets the biggest of 40, 20, 10 or 5 px that fits on your screen, so the sprites
+are always at a clean scale (×2, ×1, ×½, ×¼); only a map too big even for 5 px cells is squeezed to fit. A map smaller than
+the side panel is centred vertically. The window goes back to the menu's size on the way out.
+
+**PLAYING:** the map with a 40 px margin (the window sized to it), and the side panel: map, size, algorithm, the **view dropdown**, path length (cells
 and metres), path cost, cells searched, and the controls.
 
 | Input | Effect |

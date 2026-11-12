@@ -28,13 +28,14 @@ enum GameState {
 };
 
 //constants here:
-const float windowW = 1100;
+const float windowW = 1100; //the MENU window
 const float windowH = 800;
-//(the map's size in cells now comes from the loaded .gridmap file)
-const float boardMargin = 40;                             //empty space between the window edge and the map
-const float boardSize = windowH - 2 * boardMargin;         //the map is square: 720 x 720
-const float panelLeft = 2 * boardMargin + boardSize;       //the side panel starts right of the map
-const float panelCenterX = (panelLeft + windowW - boardMargin) / 2;
+const float boardMargin = 40;  //empty space between the window edge and the map
+const float panelWidth = 260;  //the side panel right of the map
+//PLAYING: the window resizes to the map. Each cell gets the biggest of these sizes that fits on the screen, so the
+//20 x 20 sprites are always drawn at a clean scale (x2, x1, x1/2, x1/4); only a map too big even for 5 px cells is
+//squeezed to fit.
+const float cellSizes[] = { 40, 20, 10, 5 };
 
 //places a text so that its centre is at (x, y)
 void centerText(Text& text, float x, float y) {
@@ -80,7 +81,7 @@ int main(int argc, char* argv[])
 	Text sizeHint("", font, 16);
 	sizeHint.setFillColor(Color(170, 170, 170));
 	sizeHint.setString(std::to_string(Board::MIN_MAP_SIZE) + " to " + std::to_string(Board::MAX_MAP_SIZE) + " at 0.1 m per cell. "
-		+ std::to_string(Board::DEFAULT_MAP_SIZE) + " draws the sprites 1:1 (20 px cells);\n72 halves them (10 px), 18 doubles them (40 px).");
+		+ std::to_string(Board::DEFAULT_MAP_SIZE) + " is the default.\nThe window resizes to the map: 40, 20, 10 or 5 px cells.");
 	sizeHint.setPosition(windowW / 2 - 230, 578);
 	//the number in the size box, or the default if it is empty / not a number; kept within MIN_MAP_SIZE .. MAX_MAP_SIZE
 	auto getNewMapSize = [&]() {
@@ -99,12 +100,43 @@ int main(int argc, char* argv[])
 
 	// --- PLAYING screen: side panel to the right of the map ---
 	Button saveMenuButton;
-	saveMenuButton.setup(font, "SAVE & MENU", Vector2f(panelCenterX, windowH - boardMargin - 40), Vector2f(240, 70), 26);
+	//(positioned by layoutForMap() when a map starts)
 	Text panelText("", font, 19);
-	panelText.setPosition(panelLeft, boardMargin);
 	//the view (same as pressing V); it sits in the gap left under the "View (V):" line of the panel text
 	Dropdown viewDropdown;
-	viewDropdown.setup(font, Vector2f(panelLeft + 120, boardMargin + 4 * 25 + 25), Vector2f(240, 40), getMapViewNames());
+	viewDropdown.setup(font, Vector2f(0, 0), Vector2f(240, 40), getMapViewNames());
+
+	//resizes the window to a window (width x height) and keeps it on the screen, with 1 drawing unit = 1 pixel
+	auto resizeWindow = [&](float width, float height) {
+		window.setSize(Vector2u((unsigned int)width, (unsigned int)height));
+		window.setView(View(FloatRect(0, 0, width, height)));
+		VideoMode desktop = VideoMode::getDesktopMode();
+		window.setPosition(Vector2i(std::max(0, ((int)desktop.width - (int)width) / 2), std::max(0, ((int)desktop.height - (int)height) / 2)));
+	};
+
+	//PLAYING layout for the loaded map: cell size, window size, the board's place, and the side panel
+	auto layoutForMap = [&](Board& board) {
+		VideoMode desktop = VideoMode::getDesktopMode();
+		//room for the board on this screen (leaving space for the title bar, a taskbar and the side panel)
+		float roomW = std::max(200.f, (float)desktop.width - 2 * boardMargin - panelWidth - boardMargin - 40);
+		float roomH = std::max(200.f, (float)desktop.height - 2 * boardMargin - 120);
+		int columns = board.map.getColumns(), rows = board.map.getRows();
+		float cell = 0;
+		for (float size : cellSizes) {
+			if (columns * size <= roomW && rows * size <= roomH) { cell = size; break; }
+		}
+		if (cell == 0) cell = std::min(roomW / columns, roomH / rows); //too big even for 5 px cells: squeeze it
+		float boardPixelsW = columns * cell, boardPixelsH = rows * cell;
+		//the panel needs about windowH of height (text, view dropdown, SAVE & MENU), so small maps get a taller window
+		float playW = boardMargin + boardPixelsW + boardMargin + panelWidth + boardMargin;
+		float playH = std::max(windowH, boardPixelsH + 2 * boardMargin);
+		board.setScreenArea(boardPixelsW, boardPixelsH, Vector2f(boardMargin, (playH - boardPixelsH) / 2));
+		resizeWindow(playW, playH);
+		float panelLeft = 2 * boardMargin + boardPixelsW;
+		panelText.setPosition(panelLeft, boardMargin);
+		viewDropdown.setup(font, Vector2f(panelLeft + 120, boardMargin + 4 * 25 + 25), Vector2f(240, 40), getMapViewNames(), viewDropdown.getSelectedIndex());
+		saveMenuButton.setup(font, "SAVE & MENU", Vector2f(panelLeft + panelWidth / 2, playH - boardMargin - 40), Vector2f(240, 70), 26);
+	};
 
 	// The board is created when START is pressed (a fresh board for every map)
 	std::unique_ptr<Board> GameBoard;
@@ -132,11 +164,12 @@ int main(int argc, char* argv[])
 	auto startGame = [&]() {
 		algorithm = (PathAlgorithm)algorithmDropdown.getSelectedIndex();
 		//CHARACTER (relic): player.reset(); //the character points at the board, so remove it before replacing the board
-		GameBoard = std::make_unique<Board>(boardSize, boardSize, Vector2f(boardMargin, boardMargin));
+		GameBoard = std::make_unique<Board>(windowH - 2 * boardMargin, windowH - 2 * boardMargin, Vector2f(boardMargin, boardMargin));
 		GameBoard->boardname = mapNameBox.getText();
 		GameBoard->newMapSize = getNewMapSize(); //only used if the map doesn't exist yet
 		GameBoard->view = (MapView)viewDropdown.getSelectedIndex(); //keep the view chosen last time
 		GameBoard->importBoard(GameBoard->boardname); //cleans the name: "" -> "flat", "x.gridmap" -> "x"
+		layoutForMap(*GameBoard); //the window resizes to the map
 		//CHARACTER (relic, not used on the costmap branch):
 		//int initialPos;
 		//if (GameBoard->startExists) {
@@ -160,6 +193,7 @@ int main(int argc, char* argv[])
 		mapNameBox.setText(GameBoard->boardname); //so START reopens the same map
 		refreshSavedMaps();
 		window.setTitle("Aidan's TileMap");
+		resizeWindow(windowW, windowH); //back to the menu's size
 		gameState = MENU;
 	};
 
@@ -399,12 +433,13 @@ int main(int argc, char* argv[])
 			int optionCount = (int)GameBoard->placementOptions.size();
 			Vector2f tilePos = GameBoard->getTilePos(GameBoard->placingTile);
 			float listX = tilePos.x + GameBoard->tileW + 6;
-			if (listX + rowW > boardMargin + boardSize) {
+			float boardRight = GameBoard->origin.x + GameBoard->boardW, boardBottom = GameBoard->origin.y + GameBoard->boardH;
+			if (listX + rowW > boardRight) {
 				listX = tilePos.x - rowW - 6; //no room on the right of the tile: show it on the left
 			}
 			float listY = tilePos.y;
-			if (listY + optionCount * rowH > boardMargin + boardSize) {
-				listY = boardMargin + boardSize - optionCount * rowH; //keep it inside the map at the bottom
+			if (listY + optionCount * rowH > boardBottom) {
+				listY = boardBottom - optionCount * rowH; //keep it inside the map at the bottom
 			}
 			for (int i = 0; i < optionCount; i++) {
 				bool chosen = (i == GameBoard->placementChoice);

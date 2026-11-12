@@ -77,6 +77,9 @@ public:
 	//plans on the cost layer with the chosen algorithm and stores the path / searched cells for drawing
 	void replan(PathAlgorithm algorithm);
 
+	//where the board is drawn in the window, and how big (pixels); the cell size follows from the map size
+	void setScreenArea(float width, float height, sf::Vector2f newOrigin);
+
 	void drawBoard(sf::RenderWindow& window); //draws the chosen view, the search, the path, start / end, highlights
 	void cycleView();
 
@@ -101,7 +104,7 @@ public:
 
 	//size of a new map (cells per side) when importBoard() finds no saved map; set from the menu. Saved maps keep their size.
 	int newMapSize = DEFAULT_MAP_SIZE;
-	//36: the map is 720 px, so each cell is exactly 20 px and the 20 x 20 sprites are drawn 1:1 (pixel-perfect)
+	//36 (3.6 m): fits on a 1080p screen at 20 px cells, so the 20 x 20 sprites are drawn 1:1 (pixel-perfect)
 	static constexpr int DEFAULT_MAP_SIZE = 36;
 	static constexpr int MIN_MAP_SIZE = 5, MAX_MAP_SIZE = 180; //180 -> 4 px cells, the smallest that still shows the lights
 

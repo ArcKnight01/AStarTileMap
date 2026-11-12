@@ -72,6 +72,13 @@ void Board::loadSprites() {
 	loadLights(searchedLightTexture, "Textures/light_purple.png");
 }
 
+void Board::setScreenArea(float width, float height, sf::Vector2f newOrigin) {
+	boardW = width;
+	boardH = height;
+	origin = newOrigin;
+	updateGeometry();
+}
+
 void Board::updateGeometry() {
 	tileW = (map.getColumns() > 0) ? boardW / map.getColumns() : boardW;
 	tileH = (map.getRows() > 0) ? boardH / map.getRows() : boardH;
