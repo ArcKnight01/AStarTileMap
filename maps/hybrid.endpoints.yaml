@@ -1,0 +1,7 @@
+# start and end of the path (not part of grid_map_msgs/GridMap): centre of the cell, metres, map frame
+start:
+  x: -3.0500000000000003
+  y: 3.0500000000000003
+end:
+  x: 0.05
+  y: -2.95

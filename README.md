@@ -93,20 +93,35 @@ the 10 px wall sprite draws 1:1 and the floor sprites at exactly half size. An e
 The menu lists every `.gridmap` file in `maps/`. A name that doesn't exist starts a new flat map, and **SAVE & MENU** saves to
 `maps/<name>.gridmap`. (The old 20 × 20 `.txt` maps are still in `maps/` for the main branch; this branch doesn't list them.)
 
-### File format (`.gridmap`, plain text)
-```
-gridmap 1
-size 72 72
-resolution 0.1
-start 5 66          (column row; -1 -1 = none)
-end 66 5
-layer cost
-<72 lines of 72 numbers; nan = unknown>
-layer elevation
-...
-```
+### File format: `grid_map_msgs/msg/GridMap` (ROS 2 Jazzy) in YAML
+Each map is two files in `maps/`:
+
+- **`<name>.gridmap`** is a [`grid_map_msgs/msg/GridMap`](https://github.com/ANYbotics/grid_map/tree/jazzy/grid_map_msgs/msg)
+  written as YAML in the shape `ros2 topic echo` prints it, so the file *is* the message:
+  ```bash
+  ros2 topic pub --once /elevation_map grid_map_msgs/msg/GridMap "$(cat maps/rugged.gridmap)"
+  ```
+  ```
+  header:       stamp 0, frame_id: map
+  info:         resolution: 0.1, length_x: 7.2, length_y: 7.2, pose: centre at (0, 0, 0), no rotation
+  layers:       [cost, elevation, roughness, slope, step, traversability]
+  basic_layers: []
+  data:         one std_msgs/Float32MultiArray per layer, in grid_map's storage order
+  outer_start_index: 0, inner_start_index: 0
+  ```
+  **Storage order** (as `grid_map_ros` writes it): column-major, with `dim[0] = column_index` (size = rows) and
+  `dim[1] = row_index` (size = columns). Index (0, 0) is the corner with the **largest x and y**, and i runs toward −x and
+  j toward −y. So our cell (column, row) is at `data[row * columns + (columns − 1 − column)]` (`getMessageIndex()`).
+  Unknown values are `.nan`. Each line of `data` is one of grid_map's matrix columns, which is one of our rows read from
+  right to left. When reading, block or flow sequences, either storage order, and non-zero start indices are accepted.
+- **`<name>.endpoints.yaml`** holds the start and end of the path. They are not part of the message, so they are kept next
+  to it as world positions in metres in the `map` frame (each the centre of its cell). A missing file or entry means no
+  start / end.
+
 Every layer of the map is saved (`cost`, `elevation`, `slope`, `roughness`, `step`, `traversability`). A file that has an
-`elevation` layer but no `cost` layer gets the whole pipeline run on it when it loads.
+`elevation` layer but no `cost` layer gets the whole pipeline run on it when it loads. The format was checked end to end
+against ROS: the YAML loads into a real `grid_map_msgs/msg/GridMap`, and `grid_map_ros`'s `fromMessage` puts every
+feature at the right world position. (The first format was a plain text `gridmap 1` file; the example maps were converted.)
 
 ---
 
@@ -159,7 +174,7 @@ Editing the map (painting terrain or costs) comes later. For now you place only 
 ```
 core/
   GridMap.h/.cpp            size, resolution, centred world coordinates, named float layers (NaN = unknown)
-  GridMapFile.h/.cpp        save / load .gridmap
+  GridMapFile.h/.cpp        save / load maps as grid_map_msgs/GridMap YAML (+ <name>.endpoints.yaml)
   CostMapParameters.h       every threshold, weight and radius in one struct (→ a ROS parameter file later)
   TerrainGenerator.h/.cpp   building blocks for test terrain: flat map, dunes, hills, noise, blocks
   TerrainFeatures.h/.cpp    computeSlope, computeRoughness, computeStepHeight

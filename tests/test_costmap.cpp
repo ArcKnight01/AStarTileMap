@@ -77,6 +77,17 @@ int main() {
 		CHECK(loaded.getColumns() == 10 && loaded.getRows() == 6 && near(loaded.getResolution(), 0.1, 1e-9) && start == 5 && end == 17,
 			"file: size, resolution, start and end survive");
 		CHECK(GridMap::isUnknown(loaded.at("elevation", 4, 4)) && loaded.at("elevation", 0, 0) == 1.5f, "file: values and NaN survive");
+
+		//grid_map's storage order: index (0, 0) is the corner with the largest x and y, i runs toward -x, j toward -y,
+		//column-major (checked against grid_map_ros::GridMapRosConverter::fromMessage when the format was written)
+		CHECK(getMessageIndex(map, 9, 0) == 0, "file: data[0] is the cell with the largest x and y (column 9, row 0)");
+		CHECK(getMessageIndex(map, 8, 0) == 1 && getMessageIndex(map, 9, 1) == 10, "file: data runs toward -x first, then -y");
+		CHECK(getEndpointsFilename("maps/rugged.gridmap") == "maps/rugged.endpoints.yaml", "file: start / end go next to the map");
+		GridMap noEndpoints; int noStart, noEnd;
+		saveGridMapMessage("/tmp/test_costmap_no_endpoints.gridmap", map);
+		std::remove("/tmp/test_costmap_no_endpoints.endpoints.yaml");
+		CHECK(loadGridMap("/tmp/test_costmap_no_endpoints.gridmap", noEndpoints, noStart, noEnd) && noStart == -1 && noEnd == -1,
+			"file: a map without an endpoints file loads with no start or end");
 	}
 
 	// --- features on terrain with known answers ---
