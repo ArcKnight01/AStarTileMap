@@ -2,10 +2,11 @@
 
 
 using namespace std;
-Board::Board(sf::RenderWindow& window, float height, float width, int tilesInRow, int tilesInCol) {
-	
+Board::Board(sf::RenderWindow& window, float height, float width, int tilesInRow, int tilesInCol, sf::Vector2f origin) {
+
 	boardH = height;
 	boardW = width;
+	this->origin = origin;
 
 	tilesPerRow = tilesInRow;
 	tilesPerCol = tilesInCol;
@@ -66,6 +67,14 @@ Board::Board(sf::RenderWindow& window, float height, float width, int tilesInRow
 
 void Board::drawBoard(sf::RenderWindow& window) {
 	hasBeenConverted = (hasClicked && (spaceWasPressed || enterWasPressed) && clickPos == lastTileConverted);
+
+	//outline around the whole map (drawn first; the tiles cover its inside)
+	sf::RectangleShape outline(sf::Vector2f(boardW, boardH));
+	outline.setPosition(origin);
+	outline.setFillColor(sf::Color::Transparent);
+	outline.setOutlineColor(sf::Color(200, 200, 200));
+	outline.setOutlineThickness(4);
+	window.draw(outline);
 
 	//1) every tile always draws its own sprite, so its state stays visible under any highlight
 	for (int i = 0; i < tileCount; i++) {
@@ -267,11 +276,7 @@ void Board::exportBoard(string name)
 
 	file.close();
 }
-void Board::importBoard(string& name) {
-	//create a new board or import a saved board
-	fstream file;
-
-	// list the saved maps so you know what you can type
+vector<string> Board::getSavedMapNames() {
 	vector<string> savedMaps;
 	std::error_code ec;
 	for (const auto& entry : std::filesystem::directory_iterator("maps", ec)) {
@@ -280,17 +285,10 @@ void Board::importBoard(string& name) {
 		}
 	}
 	std::sort(savedMaps.begin(), savedMaps.end());
-	cout << "Saved maps (20x20):";
-	for (const string& m : savedMaps) {
-		cout << " " << m;
-	}
-	cout << endl;
-	cout << "Type a map name and press Enter (Enter alone = default, a new name = new empty map): " << flush;
-	getline(cin, name);
+	return savedMaps;
+}
 
-	vector<int> tileNumbers;
-	tileNumbers = std::vector<int>(tileCount);
-
+string Board::cleanMapName(string name) {
 	// accept "dungeon", "dungeon.txt", "maps/dungeon" or "maps/dungeon.txt"
 	while (!name.empty() && isspace((unsigned char)name.back())) name.pop_back();
 	while (!name.empty() && isspace((unsigned char)name.front())) name.erase(0, 1);
@@ -301,6 +299,17 @@ void Board::importBoard(string& name) {
 	if (name == "") {
 		name = "default";
 	}
+	return name;
+}
+
+void Board::importBoard(string& name) {
+	//create a new board or import a saved board (the name now comes from the menu's text box)
+	fstream file;
+
+	vector<int> tileNumbers;
+	tileNumbers = std::vector<int>(tileCount);
+
+	name = cleanMapName(name);
 	string filename = "maps/" + name + ".txt";
 
 	file.open(filename, ios::in);
@@ -344,7 +353,8 @@ void Board::importBoard(string& name) {
 	}
 	else {
 		// File doesn't exist, have the user fill it in
-		cout << "No map named \"" << name << "\": starting an empty map. Press E to save it as " << filename << endl;
+		cout << "No map named \"" << name << "\": starting an empty map (SAVE & MENU saves it as " << filename << ")" << endl;
+		mapIsNew = true;
 		for (int i = 0; i < tileCount; i++) {
 			if (i % tilesPerRow == 0 || i % tilesPerRow == (tilesPerRow-1) || i / tilesPerCol == 0 || i/tilesPerCol == (tilesPerCol-1)) {
 				tileTypes[i] = wall;
@@ -360,113 +370,14 @@ void Board::importBoard(string& name) {
 	}
 	navDirty = true; //new map loaded, rebuild the nav graph
 }
-// Distance between two tiles in A* cost units: 10 per straight step, 14 per diagonal step
-// (14 ~= 10 * sqrt(2)). Same as Sebastian Lague's GetDistance().
-int Board::getDistance(int tileA, int tileB)
-{
-	int dstX = abs(tileA % tilesPerRow - tileB % tilesPerRow);
-	int dstY = abs(tileA / tilesPerRow - tileB / tilesPerRow);
-	if (dstX > dstY) {
-		return 14 * dstY + 10 * (dstX - dstY);
-	}
-	return 14 * dstX + 10 * (dstY - dstX);
-}
-
-// A* path planning, following Sebastian Lague's
-// "A* Pathfinding (E01: algorithm explanation)": https://www.youtube.com/watch?v=-L-WgKMFuhE
-// Simplest version: OPEN is a plain list searched for the lowest F cost each step.
-// Returns the tile indices from nodeA (start) to nodeB (end), both included,
-// or an empty list if there is no path.
-std::vector<int> Board::pathfinding(int nodeA, int nodeB)
-{
-	std::vector<int> path;
-	searchedTiles.clear();
-	if (nodeA < 0 || nodeA >= tileCount || nodeB < 0 || nodeB >= tileCount) {
-		return path;
-	}
-	if (navDirty) {
-		recalculateNav();
-	}
-
-	//per-tile node data
-	//G cost = distance from the start, H cost = estimated distance to the end, F cost = G + H
-	std::vector<int> gCost(tileCount, 0);
-	std::vector<int> hCost(tileCount, 0);
-	std::vector<int> parent(tileCount, -1);   //tile we came from (-1 = none)
-	std::vector<bool> inOpen(tileCount, false);
-	std::vector<bool> inClosed(tileCount, false);
-
-	//OPEN : the set of nodes to be evaluated
-	std::vector<int> openNodes;
-	//CLOSED : the set of nodes already evaluated (tracked with inClosed)
-
-	//add the start node to OPEN:
-	openNodes.push_back(nodeA);
-	inOpen[nodeA] = true;
-	hCost[nodeA] = getDistance(nodeA, nodeB);
-
-	while (!openNodes.empty()) {
-		//current = the node in OPEN with the lowest F cost (if tied, the lowest H cost)
-		int best = 0;
-		for (int k = 1; k < (int)openNodes.size(); k++) {
-			int candidate = openNodes[k];
-			int current = openNodes[best];
-			int fCandidate = gCost[candidate] + hCost[candidate];
-			int fCurrent = gCost[current] + hCost[current];
-			if (fCandidate < fCurrent || (fCandidate == fCurrent && hCost[candidate] < hCost[current])) {
-				best = k;
-			}
-		}
-		int current = openNodes[best];
-
-		//remove current from OPEN, add it to CLOSED
-		openNodes.erase(openNodes.begin() + best);
-		inOpen[current] = false;
-		inClosed[current] = true;
-		searchedTiles.push_back(current); //shown in purple
-
-		//path has been found: retrace it from the end back to the start
-		if (current == nodeB) {
-			for (int tile = nodeB; tile != -1; tile = parent[tile]) {
-				path.push_back(tile);
-			}
-			std::reverse(path.begin(), path.end());
-			return path;
-		}
-
-		//for each neighbour of the current node (walls are never in the nav graph)
-		vertex v;
-		if (!nav.getVertex(current % tilesPerRow, current / tilesPerRow, v)) {
-			continue;
-		}
-		for (const gridcoord& coord : v.adjacent) {
-			int neighbour = coord.second * tilesPerRow + coord.first;
-
-			//skip it if it has already been evaluated
-			if (inClosed[neighbour]) {
-				continue;
-			}
-
-			//if the new path to the neighbour is shorter, or the neighbour is not in OPEN yet
-			int newCostToNeighbour = gCost[current] + getDistance(current, neighbour);
-			if (newCostToNeighbour < gCost[neighbour] || !inOpen[neighbour]) {
-				gCost[neighbour] = newCostToNeighbour;
-				hCost[neighbour] = getDistance(neighbour, nodeB);
-				parent[neighbour] = current;
-
-				if (!inOpen[neighbour]) {
-					openNodes.push_back(neighbour);
-					inOpen[neighbour] = true;
-				}
-			}
-		}
-	}
-
-	//OPEN ran out without reaching the end: no path exists
-	return path;
-}
 int Board::getTileN(float x, float y) {
-	//Find the index number starting at (0,0) [index 0]going right then down 
+	//Find the index number starting at the board's top-left corner [index 0] going right then down
+	//(-1 when the point is outside the board, e.g. on the side panel)
+	x -= origin.x;
+	y -= origin.y;
+	if (x < 0 || y < 0 || x >= boardW || y >= boardH) {
+		return -1;
+	}
 	int tileX, tileY;
 	tileX = int(x / tileW);
 	tileY = int(y / tileH);
@@ -474,10 +385,10 @@ int Board::getTileN(float x, float y) {
 }
 
 sf::Vector2f Board::getTilePos(int N) {
-	//Return position of tile's origin in pixels
+	//Return position of tile's origin in pixels (in the window, so including the board's margin)
 	float posX, posY;
-	posX = (N % tilesPerRow) * tileW;
-	posY = (N / tilesPerCol) * tileH;
+	posX = origin.x + (N % tilesPerRow) * tileW;
+	posY = origin.y + (N / tilesPerCol) * tileH;
 	return sf::Vector2f(posX, posY);
 }
 

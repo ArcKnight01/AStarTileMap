@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build (if needed) and run AStarTileMap.
-#   ./run.sh            -> asks for the map name in the terminal
-#   ./run.sh dungeon    -> loads maps/dungeon.txt straight away
-#   ./run.sh --clean    -> wipes build/ first, then builds and asks for a map
+# Build (if needed) and run AStarTileMap. It opens on the menu.
+#   ./run.sh            -> menu with an empty map name (START loads "default")
+#   ./run.sh dungeon    -> menu with "dungeon" already typed in the map name box
+#   ./run.sh --clean    -> wipes build/ first, then builds and runs
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -20,9 +20,5 @@ fi
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug >/dev/null
 cmake --build build -j"$(nproc)"
 
-cd build   # the program loads Textures/ and maps/ relative to here
-if [[ $# -ge 1 ]]; then
-  echo "$1" | ./AStarTileMap
-else
-  ./AStarTileMap
-fi
+cd build   # the program loads Textures/, Font/ and maps/ relative to here
+./AStarTileMap "$@"

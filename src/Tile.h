@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <cctype>
 #include "NavGraph.h"
+#include "Pathfinding.h"
 using namespace sf;
 using namespace std;
 
@@ -29,9 +30,10 @@ class Board {
 public:
 	sf::RectangleShape tileShape; //board spaces 
 
-	float boardH, boardW; //board width and height 
-	float tileH, tileW; //tile width and height 
+	float boardH, boardW; //board width and height
+	float tileH, tileW; //tile width and height
 	float tileL;
+	sf::Vector2f origin; //top-left corner of the board in the window (the margin around the map)
 
 	//rows per tile and col
 	int tilesPerRow, tilesPerCol;
@@ -63,6 +65,7 @@ public:
 	bool startExists = false;
 	bool endExists = false;
 	bool firstEmptyTileExists = false;
+	bool mapIsNew = false; //true when importBoard() found no saved map and started an empty one
 
 	bool playerTileExists;
 	int playerTile;
@@ -73,22 +76,39 @@ public:
 	bool pieceJumping = false;
 	bool blockedTile = false;
 
-	//overloaded constructor: dictates the  board height and width 
-	Board(sf::RenderWindow& window, float height, float width, int tilesInRow,  int tilesInCol);
+	//overloaded constructor: dictates the  board height and width, and where its top-left corner sits in the window
+	Board(sf::RenderWindow& window, float height, float width, int tilesInRow,  int tilesInCol, sf::Vector2f origin = sf::Vector2f(0, 0));
 
-	void drawBoard(sf::RenderWindow& window); //draws board
+	void drawBoard(sf::RenderWindow& window); //draws board (and an outline around it)
 	void convertTile();
 	void createStartNode();
 	void createEndNode();
 	void exportBoard(string name);
+	//loads maps/<name>.txt, or starts an empty map with a wall border if it doesn't exist.
+	//name is cleaned first (see cleanMapName) and left holding the cleaned name.
 	void importBoard(string& name);
+	//names of the maps saved in maps/ (without ".txt"), sorted
+	static vector<string> getSavedMapNames();
+	//"dungeon", "dungeon.txt", "maps/dungeon" and " dungeon " all become "dungeon"; "" becomes "default"
+	static string cleanMapName(string name);
+
+	// --- Path planning (Pathfinding.cpp) ---
+	//runs the chosen algorithm: tile indices from start to end, empty if there is no path.
+	//Every algorithm also fills searchedTiles with the tiles it evaluated.
+	std::vector<int> findPath(PathAlgorithm algorithm, int nodeA, int nodeB);
 	//A* (Sebastian Lague): tile indices from start to end, empty if there is no path
 	std::vector<int> pathfinding(int nodeA, int nodeB);
+	//Dijkstra's: like A* without the H cost, so it spreads out evenly; also finds the cheapest path
+	std::vector<int> pathfindingDijkstra(int nodeA, int nodeB);
+	//breadth-first search: fewest steps (ignores that diagonals cost more)
+	std::vector<int> pathfindingBFS(int nodeA, int nodeB);
+	//depth-first search: follows one direction as far as it can; finds a path, usually not a short one
+	std::vector<int> pathfindingDFS(int nodeA, int nodeB);
 	//A* cost between two tiles: 10 per straight step, 14 per diagonal step
 	int getDistance(int tileA, int tileB);
 	//gets the position of the tile from index number (N)
 	sf::Vector2f getTilePos(int N);
-	//gets the index of the tile from the posiion
+	//gets the index of the tile from the posiion (-1 if the position is outside the board)
 	int getTileN(float x, float y);
 
 	// --- Navigation graph (merged from the C4-Template NavGraph) ---

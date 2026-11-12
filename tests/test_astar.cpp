@@ -11,7 +11,8 @@ static int failures = 0;
 #define CHECK(cond, ...) do { if (!(cond)) { failures++; std::printf("FAIL: " __VA_ARGS__); std::printf("\n"); } } while (0)
 
 // Shortest-path cost with the same moves A* uses (8 directions, 10/14 costs, no walls).
-static int dijkstra(Board& b, int start, int end) {
+// With unitCost, every step costs 1, so the result is the fewest steps (what BFS minimises).
+static int dijkstra(Board& b, int start, int end, bool unitCost = false) {
 	const int W = b.tilesPerRow, H = b.tilesPerCol, INF = 1 << 30;
 	std::vector<int> dist(b.tileCount, INF);
 	std::priority_queue<std::pair<int, int>, std::vector<std::pair<int, int>>, std::greater<>> pq;
@@ -25,7 +26,7 @@ static int dijkstra(Board& b, int start, int end) {
 			if (!dx && !dy) continue;
 			int nx = x + dx, ny = y + dy;
 			if (nx < 0 || ny < 0 || nx >= W || ny >= H || b.tileTypes[ny * W + nx] == wall) continue;
-			int n = ny * W + nx, nd = d + ((dx && dy) ? 14 : 10);
+			int n = ny * W + nx, nd = d + (unitCost ? 1 : ((dx && dy) ? 14 : 10));
 			if (nd < dist[n]) { dist[n] = nd; pq.push({nd, n}); }
 		}
 	}
@@ -64,28 +65,46 @@ int main() {
 		b.tileTypes[start] = startnode; b.tileTypes[end] = endnode;
 		b.navDirty = true;
 
-		std::vector<int> path = b.pathfinding(start, end);
 		int best = dijkstra(b, start, end);
-		if (best < 0) {
-			CHECK(path.empty(), "trial %d: A* found a path where none exists", trial);
-			blocked++;
-		} else {
-			CHECK(!path.empty(), "trial %d: A* found no path but one exists (cost %d)", trial, best);
-			if (!path.empty()) {
-				int cost = checkPath(b, path, start, end);
-				CHECK(cost == best, "trial %d: A* path cost %d, shortest is %d", trial, cost, best);
-				// searched (purple) tiles: every path tile was evaluated, and no wall ever is
-				std::vector<bool> searched(b.tileCount, false);
-				for (int t : b.searchedTiles) {
-					CHECK(b.tileTypes[t] != wall, "trial %d: wall tile %d marked as searched", trial, t);
-					searched[t] = true;
-				}
-				for (int t : path) CHECK(searched[t], "trial %d: path tile %d not marked as searched", trial, t);
+		int fewest = dijkstra(b, start, end, true);
+		if (best < 0) blocked++; else found++;
+
+		// every algorithm: a path exactly when one exists, legal steps, path tiles searched, no wall searched
+		for (PathAlgorithm algorithm : { PathAlgorithm::AStar, PathAlgorithm::Dijkstra, PathAlgorithm::BFS, PathAlgorithm::DFS }) {
+			const char* algorithmName = getPathAlgorithmName(algorithm).c_str();
+			std::vector<int> path = b.findPath(algorithm, start, end);
+			if (best < 0) {
+				CHECK(path.empty(), "trial %d: %s found a path where none exists", trial, algorithmName);
+				continue;
 			}
-			found++;
+			CHECK(!path.empty(), "trial %d: %s found no path but one exists (cost %d)", trial, algorithmName, best);
+			if (path.empty()) continue;
+			int cost = checkPath(b, path, start, end);
+			// A* and Dijkstra's must find the cheapest path; BFS the fewest steps; DFS just a valid one
+			if (algorithm == PathAlgorithm::AStar || algorithm == PathAlgorithm::Dijkstra)
+				CHECK(cost == best, "trial %d: %s path cost %d, shortest is %d", trial, algorithmName, cost, best);
+			if (algorithm == PathAlgorithm::BFS)
+				CHECK((int)path.size() - 1 == fewest, "trial %d: BFS took %d steps, fewest is %d", trial, (int)path.size() - 1, fewest);
+			// searched (purple) tiles: every path tile was evaluated, and no wall ever is
+			std::vector<bool> searched(b.tileCount, false);
+			for (int t : b.searchedTiles) {
+				CHECK(b.tileTypes[t] != wall, "trial %d: %s marked wall tile %d as searched", trial, algorithmName, t);
+				searched[t] = true;
+			}
+			for (int t : path) CHECK(searched[t], "trial %d: %s path tile %d not marked as searched", trial, algorithmName, t);
 		}
 	}
-	std::printf("random maps: %d with a path, %d without\n", found, blocked);
+	std::printf("random maps: %d with a path, %d without (each run with A*, Dijkstra's, BFS and DFS)\n", found, blocked);
+
+	// board placed with a margin: tile <-> pixel conversion includes the origin, and clicks outside give -1
+	{
+		Board placed(window, 720, 720, 20, 20, sf::Vector2f(40, 40));
+		CHECK(placed.getTilePos(0) == sf::Vector2f(40, 40), "margin: tile 0 starts at the board origin");
+		CHECK(placed.getTileN(41, 41) == 0 && placed.getTileN(40 + 720 - 1, 40 + 720 - 1) == 399, "margin: corners map to tiles 0 and 399");
+		CHECK(placed.getTileN(10, 10) == -1 && placed.getTileN(900, 300) == -1, "margin: points outside the board give -1");
+	}
+	// map names typed in the menu
+	CHECK(Board::cleanMapName("") == "default" && Board::cleanMapName(" maps/dungeon.txt ") == "dungeon", "map names are cleaned");
 
 	// 2) a solid wall across the middle row: start above, end below -> no path
 	for (int i = 0; i < b.tileCount; i++) b.tileTypes[i] = (i / b.tilesPerRow == 10) ? wall : ground;
@@ -98,11 +117,8 @@ int main() {
 	CHECK(std::find(gapPath.begin(), gapPath.end(), 10 * 20 + 15) != gapPath.end(), "walled map with a gap: path misses the gap");
 
 	// 3) the dungeon map shipped in maps/
-	std::string name;
-	std::istringstream in("dungeon");
-	std::streambuf* old = std::cin.rdbuf(in.rdbuf());
+	std::string name = "dungeon"; // the menu's text box now supplies the name
 	b.importBoard(name);
-	std::cin.rdbuf(old);
 	std::vector<int> path = b.pathfinding(b.startPos, b.endPos);
 	CHECK(!path.empty(), "dungeon: no path found");
 	if (!path.empty()) {

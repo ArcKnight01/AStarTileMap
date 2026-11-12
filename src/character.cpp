@@ -122,32 +122,39 @@ void Character::move()
 	}
 	
 
-	if (!(position.y >= 0 && position.y <= (boardref->boardH - height))) {
-		if (position.y <= 0) {
+	//keep the character on the board (the board's edges are origin and origin + boardW / boardH, because the map now
+	//has a margin around it instead of filling the window)
+	float boardTop = boardref->origin.y;
+	float boardLeft = boardref->origin.x;
+	float boardBottom = boardTop + boardref->boardH;
+	float boardRight = boardLeft + boardref->boardW;
+
+	if (!(position.y >= boardTop && position.y <= (boardBottom - height))) {
+		if (position.y <= boardTop) {
 			if (velocity.y < 0.f) {
-				position.y = 0;
+				position.y = boardTop;
 				velocity.y = 0.f;
 			}
 		}
-		else if (position.y >= (boardref->boardH - height)) {
+		else if (position.y >= (boardBottom - height)) {
 			if (velocity.y > 0.f) {
-				position.y = boardref->boardH - height;
+				position.y = boardBottom - height;
 				velocity.y = 0.f;
 			}
 		}
 	}
 
-	if (!(position.x >= 0 && (position.x <= boardref->boardW - width))) {
-		if (position.x <= 0) {
+	if (!(position.x >= boardLeft && (position.x <= boardRight - width))) {
+		if (position.x <= boardLeft) {
 			//can not move left but can move right, thus velocity = 0 if velocity < 0 (negative, meaning moving left)
 			if (velocity.x < 0.f) {
-				position.x = 0;
+				position.x = boardLeft;
 				velocity.x = 0.f;
 			}
 		}
-		else if (position.x >= (boardref->boardW - width)) {
+		else if (position.x >= (boardRight - width)) {
 			if (velocity.x > 0.f) {
-				position.x = boardref->boardW - width;
+				position.x = boardRight - width;
 				velocity.x = 0.f;
 			}
 		}
