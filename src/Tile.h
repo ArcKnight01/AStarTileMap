@@ -113,7 +113,7 @@ public:
 	//Every algorithm also fills searchedTiles with the tiles it evaluated.
 	std::vector<int> findPath(PathAlgorithm algorithm, int nodeA, int nodeB);
 	//A* (Sebastian Lague): tile indices from start to end, empty if there is no path
-	std::vector<int> pathfinding(int nodeA, int nodeB);
+	std::vector<int> pathfindingAstar(int nodeA, int nodeB);
 	//Dijkstra's: like A* without the H cost, so it spreads out evenly; also finds the cheapest path
 	std::vector<int> pathfindingDijkstra(int nodeA, int nodeB);
 	//breadth-first search: fewest steps (ignores that diagonals cost more)
@@ -137,7 +137,7 @@ public:
 	// --- Path display ---
 	// pathTiles: the A* path (start -> end), drawn with the blue light.
 	// searchedTiles: every tile A* evaluated (its CLOSED set), drawn with the purple light.
-	// pathfinding() fills both; drawBoard() draws purple first, then blue on top.
+	// pathfindingAstar() fills both; drawBoard() draws purple first, then blue on top.
 	std::vector<int> pathTiles;
 	std::vector<int> searchedTiles;
 

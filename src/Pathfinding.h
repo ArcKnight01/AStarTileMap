@@ -3,7 +3,7 @@
 #include <vector>
 
 // The path planning algorithms the menu's dropdown can choose from.
-// To add one: add it here and to getPathAlgorithmNames() (same order), write a Board::pathfinding...() function in
+// To add one: add it here and to getPathAlgorithmNames() (same order), write a Board::pathfindingAstar...() function in
 // Pathfinding.cpp, and call it from Board::findPath().
 enum class PathAlgorithm {
 	AStar,

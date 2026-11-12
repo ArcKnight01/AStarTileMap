@@ -1,4 +1,4 @@
-// Checks Board::pathfinding (A*) against a brute-force Dijkstra search on random maps.
+// Checks Board::pathfindingAstar (A*) against a brute-force Dijkstra search on random maps.
 // A* must find a path exactly when one exists, and its path must be as short as Dijkstra's.
 // Run with:  ctest --test-dir build --output-on-failure
 #include "Tile.h"
@@ -149,17 +149,17 @@ int main() {
 	// 2) a solid wall across the middle row: start above, end below -> no path
 	for (int i = 0; i < b.tileCount; i++) b.tileTypes[i] = (i / b.tilesPerRow == 10) ? wall : ground;
 	b.navDirty = true;
-	CHECK(b.pathfinding(2 * 20 + 5, 17 * 20 + 5).empty(), "walled-off map: A* found a path through a wall");
+	CHECK(b.pathfindingAstar(2 * 20 + 5, 17 * 20 + 5).empty(), "walled-off map: A* found a path through a wall");
 	// ...and one gap in that wall -> the path must go through the gap
 	b.tileTypes[10 * 20 + 15] = ground;
 	b.navDirty = true;
-	std::vector<int> gapPath = b.pathfinding(2 * 20 + 5, 17 * 20 + 5);
+	std::vector<int> gapPath = b.pathfindingAstar(2 * 20 + 5, 17 * 20 + 5);
 	CHECK(std::find(gapPath.begin(), gapPath.end(), 10 * 20 + 15) != gapPath.end(), "walled map with a gap: path misses the gap");
 
 	// 3) the dungeon map shipped in maps/
 	std::string name = "dungeon"; // the menu's text box now supplies the name
 	b.importBoard(name);
-	std::vector<int> path = b.pathfinding(b.startPos, b.endPos);
+	std::vector<int> path = b.pathfindingAstar(b.startPos, b.endPos);
 	CHECK(!path.empty(), "dungeon: no path found");
 	if (!path.empty()) {
 		int cost = checkPath(b, path, b.startPos, b.endPos);

@@ -21,7 +21,7 @@ int Board::getDistance(int tileA, int tileB)
 // Simplest version: OPEN is a plain list searched for the lowest F cost each step.
 // Returns the tile indices from nodeA (start) to nodeB (end), both included,
 // or an empty list if there is no path.
-std::vector<int> Board::pathfinding(int nodeA, int nodeB)
+std::vector<int> Board::pathfindingAstar(int nodeA, int nodeB)
 {
 	std::vector<int> path;
 	searchedTiles.clear();
@@ -114,12 +114,12 @@ std::vector<int> Board::pathfinding(int nodeA, int nodeB)
 std::vector<int> Board::findPath(PathAlgorithm algorithm, int nodeA, int nodeB)
 {
 	switch (algorithm) {
-	case PathAlgorithm::AStar:    return pathfinding(nodeA, nodeB);
+	case PathAlgorithm::AStar:    return pathfindingAstar(nodeA, nodeB);
 	case PathAlgorithm::Dijkstra: return pathfindingDijkstra(nodeA, nodeB);
 	case PathAlgorithm::BFS:      return pathfindingBFS(nodeA, nodeB);
 	case PathAlgorithm::DFS:      return pathfindingDFS(nodeA, nodeB);
 	}
-	return pathfinding(nodeA, nodeB);
+	return pathfindingAstar(nodeA, nodeB);
 }
 
 // Dijkstra's algorithm: the same as the A* above, but with no H cost (no estimate of the distance to the end).
