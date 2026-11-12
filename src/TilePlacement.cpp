@@ -6,7 +6,8 @@
 //   2. Up / Down                           -> movePlacementChoice(): the cell previews the highlighted option
 //   3. click the same cell again, or Enter -> confirmPlacement()
 //   right-click, Backspace or Esc          -> cancelPlacement()
-// Start / End are offered only while they don't exist yet and never on a lethal cell; Clear removes them.
+// Start / End are offered on every walkable cell (moving them there if they already exist), never on a lethal cell;
+// Clear removes the start / end from the cell they are on.
 
 string Board::getPlacementName(PlacementOption option) {
 	switch (option) {
@@ -15,6 +16,12 @@ string Board::getPlacementName(PlacementOption option) {
 	case PlacementOption::Clear: return "Clear";
 	}
 	return "Clear";
+}
+
+string Board::getPlacementLabel(PlacementOption option) const {
+	if (option == PlacementOption::Start && startExists) return "Move start";
+	if (option == PlacementOption::End && endExists) return "Move end";
+	return getPlacementName(option);
 }
 
 void Board::beginPlacement(int tile) {
@@ -26,11 +33,14 @@ void Board::beginPlacement(int tile) {
 	bool lethal = isLethal(map.getLayer("cost")[tile], parameters);
 	bool isStart = startExists && tile == startPos;
 	bool isEnd = endExists && tile == endPos;
-	if (!startExists && !lethal) placementOptions.push_back(PlacementOption::Start);
-	if (!endExists && !lethal && !isStart) placementOptions.push_back(PlacementOption::End);
+	//OLD: Start / End only while they didn't exist yet, so on a map that has both, only their own cells could be selected
+	//if (!startExists && !lethal) placementOptions.push_back(PlacementOption::Start);
+	//if (!endExists && !lethal && !isStart) placementOptions.push_back(PlacementOption::End);
+	if (!lethal && !isStart && !isEnd) placementOptions.push_back(PlacementOption::Start);
+	if (!lethal && !isStart && !isEnd) placementOptions.push_back(PlacementOption::End);
 	if (isStart || isEnd) placementOptions.push_back(PlacementOption::Clear);
 	if (placementOptions.empty()) {
-		cancelPlacement(); //nothing can be placed here (a lethal cell, or both already placed elsewhere)
+		cancelPlacement(); //nothing can be placed on a lethal cell
 		return;
 	}
 	isPlacing = true;
@@ -51,11 +61,11 @@ void Board::confirmPlacement() {
 		return;
 	}
 	switch (placementOptions[placementChoice]) {
-	case PlacementOption::Start:
+	case PlacementOption::Start: //places it, or moves it here
 		startPos = placingTile;
 		startExists = true;
 		break;
-	case PlacementOption::End:
+	case PlacementOption::End: //places it, or moves it here
 		endPos = placingTile;
 		endExists = true;
 		break;

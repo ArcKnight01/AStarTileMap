@@ -124,7 +124,7 @@ and metres), path cost, cells searched, and the controls.
 
 | Input | Effect |
 |---|---|
-| **Left click** a cell | Select it. A list appears beside it: **Start** / **End** (only while missing, never on a lethal cell) and **Clear** (on the start or end cell). |
+| **Left click** a cell | Select it. A list appears beside it: **Start** / **End** on any walkable cell (shown as **Move start** / **Move end** when they already exist), or **Clear** on the start or end cell. Lethal cells can't be selected. |
 | **↑ / ↓** | Choose; the cell previews it |
 | **Left click** the same cell again, or **Enter** | Place it, and the path re-plans |
 | **Right click**, **Backspace** or **Esc** | Unselect (Esc goes back to the menu when nothing is selected) |

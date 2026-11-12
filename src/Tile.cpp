@@ -271,6 +271,9 @@ void Board::drawBoard(sf::RenderWindow& window) {
 	PlacementOption preview = previewing ? placementOptions[placementChoice] : PlacementOption::Clear;
 	if (startExists) lights[startPos] = StartLight;
 	if (endExists) lights[endPos] = EndLight;
+	//previewing a move: the old start / end goes dark while the new cell shows it
+	if (previewing && preview == PlacementOption::Start && startExists) lights[startPos] = NoLight;
+	if (previewing && preview == PlacementOption::End && endExists) lights[endPos] = NoLight;
 	if (previewing && preview == PlacementOption::Clear) lights[placingTile] = NoLight;
 	if (previewing && preview == PlacementOption::Start) lights[placingTile] = StartLight;
 	if (previewing && preview == PlacementOption::End) lights[placingTile] = EndLight;

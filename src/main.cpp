@@ -207,7 +207,7 @@ int main(int argc, char* argv[])
 			//GameBoard->newClick = false;
 			//GameBoard->spacePressed = false;
 			//GameBoard->enterPressed = false;
-			GameBoard->leftMousePos = GameBoard->getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
+			GameBoard->leftMousePos = GameBoard->getTileN(mouse.x, mouse.y); //window coordinates, so it stays right if the window is stretched
 		}
 		sf::Event event;
 		while (window.pollEvent(event))
@@ -354,7 +354,7 @@ int main(int argc, char* argv[])
 
 					//NEW controls: click a tile to select it; click the same tile again to place the previewed type.
 					//Clicking a different tile moves the selection there; clicks outside the map are ignored.
-					int clickedTile = GameBoard->getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
+					int clickedTile = GameBoard->getTileN(mouse.x, mouse.y);
 					if (clickedTile != -1) {
 						if (GameBoard->isPlacing && clickedTile == GameBoard->placingTile) {
 							GameBoard->confirmPlacement();
@@ -429,7 +429,7 @@ int main(int argc, char* argv[])
 
 		//list of what can be placed, next to the selected tile (the highlighted entry is the one previewed on the tile)
 		if (GameBoard->isPlacing) {
-			const float rowW = 110, rowH = 28;
+			const float rowW = 140, rowH = 28;
 			int optionCount = (int)GameBoard->placementOptions.size();
 			Vector2f tilePos = GameBoard->getTilePos(GameBoard->placingTile);
 			float listX = tilePos.x + GameBoard->tileW + 6;
@@ -449,7 +449,7 @@ int main(int argc, char* argv[])
 				row.setOutlineColor(chosen ? Color::Cyan : Color(150, 150, 150));
 				row.setOutlineThickness(chosen ? -2.f : -1.f);
 				window.draw(row);
-				Text optionText((chosen ? "> " : "  ") + Board::getPlacementName(GameBoard->placementOptions[i]), font, 17);
+				Text optionText((chosen ? "> " : "  ") + GameBoard->getPlacementLabel(GameBoard->placementOptions[i]), font, 17);
 				optionText.setPosition(listX + 6, listY + i * rowH + 3);
 				window.draw(optionText);
 			}

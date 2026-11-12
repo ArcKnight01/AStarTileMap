@@ -90,8 +90,8 @@ public:
 
 	// --- placing the start and end (TilePlacement.cpp) ---
 	// Click a cell to select it, pick from the list with Up / Down (the cell previews it), click it again (or Enter) to
-	// place, right-click / Backspace to unselect. Start and End are only offered while they don't exist yet, and never on
-	// a lethal cell; Clear is offered on the cell that is the start or end.
+	// place, right-click / Backspace to unselect. Start and End are offered on every walkable cell (they move there if
+	// they already exist), never on a lethal cell; Clear is offered on the cell that is the start or end.
 	bool isPlacing = false;
 	int placingTile = -1;
 	std::vector<PlacementOption> placementOptions;
@@ -101,6 +101,7 @@ public:
 	void confirmPlacement();
 	void cancelPlacement();
 	static string getPlacementName(PlacementOption option);
+	string getPlacementLabel(PlacementOption option) const; //as shown in the list: "Move start" when the start exists
 
 	//size of a new map (cells per side) when importBoard() finds no saved map; set from the menu. Saved maps keep their size.
 	int newMapSize = DEFAULT_MAP_SIZE;
