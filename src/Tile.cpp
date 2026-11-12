@@ -9,17 +9,67 @@
 using namespace std;
 
 vector<string> getMapViewNames() {
-	return { "Terrain", "Cost", "Traversability", "Slope", "Roughness", "Step" };
+	return { "Terrain", "Elevation", "Cost", "Traversability", "Slope", "Roughness", "Step" };
 }
 
 Board::Board(float height, float width, sf::Vector2f origin) {
 	boardH = height;
 	boardW = width;
 	this->origin = origin;
-	wallTexture.loadFromFile("Textures/wall.png");
-	wallTexture.setRepeated(true);
-	map = GridMap(80, 80, 0.1);
+	loadSprites();
+	map = GridMap(newMapSize, newMapSize, 0.1);
 	updateGeometry();
+}
+
+//brightness of a pixel (0 .. 255)
+static float getBrightness(sf::Color color) {
+	return 0.299f * color.r + 0.587f * color.g + 0.114f * color.b;
+}
+
+//how bright the average ground pixel is in groundTexture (the rest of the range is left for the lighter pixels)
+static const float GROUND_LEVEL = 170.f;
+
+void Board::loadSprites() {
+	wallTexture.loadFromFile("Textures/wall.png");
+	sf::Image floor;
+	floor.loadFromFile("Textures/floorTile.png");
+	sf::Vector2u size = floor.getSize();
+
+	//groundTexture: the floor as brightness only, scaled so the average pixel is GROUND_LEVEL
+	double brightnessSum = 0;
+	for (unsigned int y = 0; y < size.y; y++) {
+		for (unsigned int x = 0; x < size.x; x++) brightnessSum += getBrightness(floor.getPixel(x, y));
+	}
+	float averageBrightness = std::max(1.f, (float)(brightnessSum / (size.x * size.y)));
+	sf::Image ground;
+	ground.create(size.x, size.y);
+	for (unsigned int y = 0; y < size.y; y++) {
+		for (unsigned int x = 0; x < size.x; x++) {
+			float level = std::min(255.f, getBrightness(floor.getPixel(x, y)) / averageBrightness * GROUND_LEVEL);
+			ground.setPixel(x, y, sf::Color((sf::Uint8)level, (sf::Uint8)level, (sf::Uint8)level));
+		}
+	}
+	groundTexture.loadFromImage(ground);
+
+	//a light texture: the sprite's pixels that differ from the floor (its lights); everything else transparent
+	auto loadLights = [&](sf::Texture& texture, const std::string& file) {
+		sf::Image sprite;
+		sprite.loadFromFile(file);
+		sf::Image lights;
+		lights.create(size.x, size.y, sf::Color::Transparent);
+		if (sprite.getSize() == size) {
+			for (unsigned int y = 0; y < size.y; y++) {
+				for (unsigned int x = 0; x < size.x; x++) {
+					if (sprite.getPixel(x, y) != floor.getPixel(x, y)) lights.setPixel(x, y, sprite.getPixel(x, y));
+				}
+			}
+		}
+		texture.loadFromImage(lights);
+	};
+	loadLights(startLightTexture, "Textures/startTile.png");
+	loadLights(endLightTexture, "Textures/endTile.png");
+	loadLights(pathLightTexture, "Textures/light_blue.png");
+	loadLights(searchedLightTexture, "Textures/light_purple.png");
 }
 
 void Board::updateGeometry() {
@@ -68,9 +118,11 @@ void Board::importBoard(string& name) {
 		mapIsNew = false;
 	}
 	else {
-		// No saved map: start a new flat one (cost 0 everywhere) of the usual size
-		cout << "No map named \"" << name << "\": starting a new flat map (SAVE & MENU saves it as " << filename << ")" << endl;
-		map = GridMap(80, 80, 0.1);
+		// No saved map: start a new flat one (cost 0 everywhere) of the size chosen in the menu
+		newMapSize = std::max(MIN_MAP_SIZE, std::min(MAX_MAP_SIZE, newMapSize));
+		cout << "No map named \"" << name << "\": starting a new " << newMapSize << " x " << newMapSize
+			<< " flat map (SAVE & MENU saves it as " << filename << ")" << endl;
+		map = GridMap(newMapSize, newMapSize, 0.1);
 		map.addLayer("elevation", 0.f);
 		mapIsNew = true;
 	}
@@ -134,25 +186,31 @@ static sf::Color getHeatColor(double amount) {
 	return blend(middle, bad, (amount - 0.5) * 2);
 }
 
-sf::Color Board::getCellColor(int index) {
+sf::Color Board::getGroundColor(int index) {
 	const sf::Color unknown(0, 0, 0);
 	auto layerValue = [&](const char* name) -> float {
 		return map.hasLayer(name) ? map.getLayer(name)[index] : GridMap::getUnknownValue();
 	};
 	switch (view) {
 	case MapView::Terrain: {
-		//elevation from the floor sprite's brown (lowest point of the map) to the wall sprite's grey (highest point),
-		//both brightened so height differences are easy to see
-		const sf::Color low(96, 80, 48), high(168, 168, 168);
+		//the floor sprite's brown on smooth ground; rougher (costlier) ground makes it darker, then slowly grey like the wall
+		const sf::Color brown(64, 55, 33), darkBrown(40, 34, 21), grey(62, 62, 62);
+		float c = layerValue("cost");
+		if (GridMap::isUnknown(c)) return unknown;
+		double rough = c / (1.0 - parameters.traversabilityThreshold); //traversable costs run from 0 to 0.5
+		if (rough < 0.5) return blend(brown, darkBrown, rough * 2);
+		return blend(darkBrown, grey, (rough - 0.5) * 2);
+	}
+	case MapView::Elevation: {
 		float z = layerValue("elevation");
 		if (GridMap::isUnknown(z)) return unknown;
-		if (elevationHighest - elevationLowest < 1e-6f) return low; //a flat map is all brown
-		return blend(low, high, (z - elevationLowest) / (elevationHighest - elevationLowest));
+		if (elevationHighest - elevationLowest < 1e-6f) return getHeatColor(0); //a flat map is all one colour
+		return getHeatColor((z - elevationLowest) / (elevationHighest - elevationLowest));
 	}
 	case MapView::Cost: {
 		float c = layerValue("cost");
 		if (GridMap::isUnknown(c)) return unknown;
-		return getHeatColor(c / 0.5); //traversable costs run from 0 to 0.5
+		return getHeatColor(c / (1.0 - parameters.traversabilityThreshold)); //traversable costs run from 0 to 0.5
 	}
 	case MapView::Traversability: {
 		float t = layerValue("traversability");
@@ -184,7 +242,7 @@ void Board::drawBoard(sf::RenderWindow& window) {
 	outline.setOutlineThickness(4);
 	window.draw(outline);
 
-	//lowest and highest known elevation, for the Terrain view's brown-to-grey scale (worked out once per frame)
+	//lowest and highest known elevation, for the Elevation view's colour scale (worked out once per frame)
 	elevationLowest = 0.f;
 	elevationHighest = 0.f;
 	if (map.hasLayer("elevation")) {
@@ -197,64 +255,51 @@ void Board::drawBoard(sf::RenderWindow& window) {
 		}
 	}
 
-	//1) every cell: coloured by the chosen view, or the stone wall texture if it is lethal (in every view)
-	const std::vector<float>& cost = map.getLayer("cost");
-	sf::VertexArray cells(sf::Quads);
-	sf::VertexArray lethalCells(sf::Quads);
-	for (int i = 0; i < map.getCellCount(); i++) {
-		sf::Vector2f p = getTilePos(i);
-		sf::Vector2f corners[4] = { p, p + sf::Vector2f(tileW, 0), p + sf::Vector2f(tileW, tileH), p + sf::Vector2f(0, tileH) };
-		if (isLethal(cost[i], parameters)) {
-			//texture coordinates follow the window position, so neighbouring lethal cells form one continuous stone wall
-			for (const sf::Vector2f& corner : corners) {
-				lethalCells.append(sf::Vertex(corner, sf::Color(205, 205, 205), (corner - origin) * (10.f / 18.f)));
-			}
-		}
-		else {
-			sf::Color color = getCellColor(i);
-			for (const sf::Vector2f& corner : corners) {
-				cells.append(sf::Vertex(corner, color));
-			}
-		}
-	}
-	window.draw(cells);
-	window.draw(lethalCells, &wallTexture);
-
-	//2) the search result: searched cells tinted purple, then the path in blue on top
-	sf::RectangleShape box;
-	box.setSize(sf::Vector2f(tileW, tileH));
-	box.setFillColor(sf::Color(150, 60, 210, 110));
-	for (int i : searchedTiles) {
-		box.setPosition(getTilePos(i));
-		window.draw(box);
-	}
-	box.setSize(sf::Vector2f(tileW * 0.6f, tileH * 0.6f));
-	box.setFillColor(sf::Color(60, 150, 255));
-	for (int i : pathTiles) {
-		box.setPosition(getTilePos(i) + sf::Vector2f(tileW * 0.2f, tileH * 0.2f));
-		window.draw(box);
-	}
-
-	//3) start (green) and end (red); a selected cell shows the option being previewed instead
-	auto drawMarker = [&](int i, sf::Color color) {
-		sf::CircleShape marker(std::max(tileW, 6.f) * 0.9f);
-		marker.setOrigin(marker.getRadius(), marker.getRadius());
-		marker.setPosition(getTilePos(i) + sf::Vector2f(tileW / 2, tileH / 2));
-		marker.setFillColor(color);
-		marker.setOutlineColor(sf::Color::White);
-		marker.setOutlineThickness(2);
-		window.draw(marker);
-	};
+	//which lights each cell shows (start / end > path > searched); a selected cell previews the option being chosen
+	enum Light { NoLight, SearchedLight, PathLight, StartLight, EndLight };
+	std::vector<Light> lights(map.getCellCount(), NoLight);
+	for (int i : searchedTiles) lights[i] = SearchedLight;
+	for (int i : pathTiles) lights[i] = PathLight;
 	bool previewing = isPlacing && placingTile >= 0 && placingTile < map.getCellCount() && !placementOptions.empty();
 	PlacementOption preview = previewing ? placementOptions[placementChoice] : PlacementOption::Clear;
-	if (startExists && !(previewing && placingTile == startPos && preview == PlacementOption::Clear)) {
-		drawMarker(startPos, sf::Color(40, 200, 80));
+	if (startExists) lights[startPos] = StartLight;
+	if (endExists) lights[endPos] = EndLight;
+	if (previewing && preview == PlacementOption::Clear) lights[placingTile] = NoLight;
+	if (previewing && preview == PlacementOption::Start) lights[placingTile] = StartLight;
+	if (previewing && preview == PlacementOption::End) lights[placingTile] = EndLight;
+
+	//every cell is one sprite at cell size: lethal cells the stone wall; the others the floor, its brown recoloured by
+	//the view (getGroundColor), with the cell's lights on top. One vertex array per texture, so 6400 cells stay fast.
+	const std::vector<float>& cost = map.getLayer("cost");
+	sf::VertexArray wallCells(sf::Quads), groundCells(sf::Quads);
+	sf::VertexArray lightCells[5] = { sf::VertexArray(sf::Quads), sf::VertexArray(sf::Quads), sf::VertexArray(sf::Quads),
+		sf::VertexArray(sf::Quads), sf::VertexArray(sf::Quads) };
+	auto addQuad = [&](sf::VertexArray& cells, int i, sf::Color color, float textureSize) {
+		sf::Vector2f p = getTilePos(i);
+		cells.append(sf::Vertex(p, color, sf::Vector2f(0, 0)));
+		cells.append(sf::Vertex(p + sf::Vector2f(tileW, 0), color, sf::Vector2f(textureSize, 0)));
+		cells.append(sf::Vertex(p + sf::Vector2f(tileW, tileH), color, sf::Vector2f(textureSize, textureSize)));
+		cells.append(sf::Vertex(p + sf::Vector2f(0, tileH), color, sf::Vector2f(0, textureSize)));
+	};
+	const float spriteSize = (float)groundTexture.getSize().x; //20
+	const float wallSize = (float)wallTexture.getSize().x;     //10
+	for (int i = 0; i < map.getCellCount(); i++) {
+		if (isLethal(cost[i], parameters) && lights[i] == NoLight) {
+			addQuad(wallCells, i, sf::Color::White, wallSize);
+			continue;
+		}
+		//groundTexture's average pixel is GROUND_LEVEL, so this colour makes the average pixel the ground colour
+		sf::Color ground = getGroundColor(i);
+		auto scale = [](sf::Uint8 value) { return (sf::Uint8)std::min(255.f, value * 255.f / GROUND_LEVEL); };
+		addQuad(groundCells, i, sf::Color(scale(ground.r), scale(ground.g), scale(ground.b)), spriteSize);
+		if (lights[i] != NoLight) addQuad(lightCells[lights[i]], i, sf::Color::White, spriteSize);
 	}
-	if (endExists && !(previewing && placingTile == endPos && preview == PlacementOption::Clear)) {
-		drawMarker(endPos, sf::Color(220, 50, 50));
-	}
-	if (previewing && preview == PlacementOption::Start) drawMarker(placingTile, sf::Color(40, 200, 80, 170));
-	if (previewing && preview == PlacementOption::End) drawMarker(placingTile, sf::Color(220, 50, 50, 170));
+	window.draw(wallCells, &wallTexture);
+	window.draw(groundCells, &groundTexture);
+	window.draw(lightCells[SearchedLight], &searchedLightTexture);
+	window.draw(lightCells[PathLight], &pathLightTexture);
+	window.draw(lightCells[StartLight], &startLightTexture);
+	window.draw(lightCells[EndLight], &endLightTexture);
 
 	//4) highlights on top: a see-through tint plus an outline drawn inward, so what's underneath stays visible
 	auto drawHighlight = [&](int i, sf::Color color, sf::Uint8 tintAlpha, float thickness) {

@@ -13,6 +13,7 @@ public:
 	void draw(sf::RenderWindow& window, sf::Vector2f mouse);
 
 	int getSelectedIndex() const;
+	void setSelectedIndex(int index); //e.g. when a key changes the same setting
 	std::string getSelectedText() const;
 	bool isOpen() const;
 

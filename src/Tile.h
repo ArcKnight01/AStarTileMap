@@ -18,7 +18,8 @@ using namespace std;
 
 // What the map shows. V cycles through these on the PLAYING screen.
 enum class MapView {
-	Terrain,        //elevation, brown (low) to grey (high); lethal cells drawn with the stone wall texture
+	Terrain,        //the floor sprite: its brown gets darker, then grey, as the ground gets rougher (cost 0 -> 0.5)
+	Elevation,      //height: low (green) -> high (red)
 	Cost,           //the cost layer the planner uses: green (0) -> yellow -> red (0.5); lethal = stone
 	Traversability, //0 (red) .. 1 (green)
 	Slope,          //0 .. criticalSlope
@@ -98,10 +99,27 @@ public:
 	void cancelPlacement();
 	static string getPlacementName(PlacementOption option);
 
-	sf::Texture wallTexture; //stone, for lethal cells
+	//size of a new map (cells per side) when importBoard() finds no saved map; set from the menu. Saved maps keep their size.
+	int newMapSize = DEFAULT_MAP_SIZE;
+	//36: the map is 720 px, so each cell is exactly 20 px and the 20 x 20 sprites are drawn 1:1 (pixel-perfect)
+	static constexpr int DEFAULT_MAP_SIZE = 36;
+	static constexpr int MIN_MAP_SIZE = 5, MAX_MAP_SIZE = 180; //180 -> 4 px cells, the smallest that still shows the lights
+
+	// --- the sprites (assets/Textures), drawn one per cell at cell size, as on the main branch ---
+	// Every cell sprite is the same brown floor plus coloured lights. At load time each is split in two:
+	//  groundTexture: the floor's brown as brightness only (grey), so a vertex colour can recolour it per cell
+	//  light textures: only the pixels where that sprite differs from floorTile.png (its lights), the rest transparent
+	sf::Texture wallTexture;          //stone (wall.png, 10 x 10): lethal cells
+	sf::Texture groundTexture;        //from floorTile.png
+	sf::Texture startLightTexture;    //startTile.png: green lights
+	sf::Texture endLightTexture;      //endTile.png: red lights
+	sf::Texture pathLightTexture;     //light_blue.png: the path
+	sf::Texture searchedLightTexture; //light_purple.png: cells the algorithm searched
+	//what colour the brown of a cell is drawn in (Terrain view: brown -> darker -> grey; other views: their heat colour)
+	sf::Color getGroundColor(int index);
 
 private:
 	void updateGeometry(); //tile size from the board size and the map size
-	sf::Color getCellColor(int index);
+	void loadSprites();
 	float elevationLowest = 0.f, elevationHighest = 0.f; //the Terrain view's colour range (set in drawBoard)
 };

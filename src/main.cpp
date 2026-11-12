@@ -5,9 +5,11 @@
 #include <SFML/Graphics/Rect.hpp>
 // Include Needed for Text
 #include <SFML/Graphics/Text.hpp>
+#include <algorithm>
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include "Tile.h"
 //CHARACTER (relic, not used on the costmap branch): #include "character.h"
 #include "Button.h"
@@ -53,12 +55,12 @@ int main(int argc, char* argv[])
 
 	// --- MENU screen ---
 	Text title("A* TileMap", font, 64);
-	centerText(title, windowW / 2, 110);
+	centerText(title, windowW / 2, 90);
 
 	Text mapLabel("Map name", font, 24);
-	mapLabel.setPosition(windowW / 2 - 230, 230);
+	mapLabel.setPosition(windowW / 2 - 230, 175);
 	TextBox mapNameBox;
-	mapNameBox.setup(font, Vector2f(windowW / 2, 300), Vector2f(460, 60), "flat");
+	mapNameBox.setup(font, Vector2f(windowW / 2, 240), Vector2f(460, 56), "flat");
 	if (argc > 1) {
 		mapNameBox.setText(argv[1]);
 	}
@@ -66,18 +68,43 @@ int main(int argc, char* argv[])
 	savedMapsText.setFillColor(Color(170, 170, 170));
 
 	Text algorithmLabel("Algorithm", font, 24);
-	algorithmLabel.setPosition(windowW / 2 - 230, 400);
+	algorithmLabel.setPosition(windowW / 2 - 230, 350);
 	Dropdown algorithmDropdown;
-	algorithmDropdown.setup(font, Vector2f(windowW / 2, 470), Vector2f(460, 56), getPathAlgorithmNames());
+	algorithmDropdown.setup(font, Vector2f(windowW / 2, 415), Vector2f(460, 56), getPathAlgorithmNames());
+
+	//size of a new map, in cells per side (a saved map keeps its own size)
+	Text sizeLabel("Size of a new map (cells per side)", font, 24);
+	sizeLabel.setPosition(windowW / 2 - 230, 475);
+	TextBox mapSizeBox;
+	mapSizeBox.setup(font, Vector2f(windowW / 2, 540), Vector2f(460, 56), std::to_string(Board::DEFAULT_MAP_SIZE), 3);
+	Text sizeHint("", font, 16);
+	sizeHint.setFillColor(Color(170, 170, 170));
+	sizeHint.setString(std::to_string(Board::MIN_MAP_SIZE) + " to " + std::to_string(Board::MAX_MAP_SIZE) + " at 0.1 m per cell. "
+		+ std::to_string(Board::DEFAULT_MAP_SIZE) + " draws the sprites 1:1 (20 px cells);\n72 halves them (10 px), 18 doubles them (40 px).");
+	sizeHint.setPosition(windowW / 2 - 230, 578);
+	//the number in the size box, or the default if it is empty / not a number; kept within MIN_MAP_SIZE .. MAX_MAP_SIZE
+	auto getNewMapSize = [&]() {
+		int size = Board::DEFAULT_MAP_SIZE;
+		try {
+			if (!mapSizeBox.getText().empty()) size = std::stoi(mapSizeBox.getText());
+		}
+		catch (const std::exception&) {
+			size = Board::DEFAULT_MAP_SIZE;
+		}
+		return std::max(Board::MIN_MAP_SIZE, std::min(Board::MAX_MAP_SIZE, size));
+	};
 
 	Button startButton;
-	startButton.setup(font, "START", Vector2f(windowW / 2, 660), Vector2f(300, 80), 40);
+	startButton.setup(font, "START", Vector2f(windowW / 2, 705), Vector2f(300, 70), 40);
 
 	// --- PLAYING screen: side panel to the right of the map ---
 	Button saveMenuButton;
 	saveMenuButton.setup(font, "SAVE & MENU", Vector2f(panelCenterX, windowH - boardMargin - 40), Vector2f(240, 70), 26);
 	Text panelText("", font, 19);
 	panelText.setPosition(panelLeft, boardMargin);
+	//the view (same as pressing V); it sits in the gap left under the "View (V):" line of the panel text
+	Dropdown viewDropdown;
+	viewDropdown.setup(font, Vector2f(panelLeft + 120, boardMargin + 4 * 25 + 25), Vector2f(240, 40), getMapViewNames());
 
 	// The board is created when START is pressed (a fresh board for every map)
 	std::unique_ptr<Board> GameBoard;
@@ -97,7 +124,7 @@ int main(int argc, char* argv[])
 		}
 		list += "\nEmpty loads \"flat\"; a new name starts a new flat map.";
 		savedMapsText.setString(list);
-		savedMapsText.setPosition(windowW / 2 - 230, 342);
+		savedMapsText.setPosition(windowW / 2 - 230, 278);
 	};
 	refreshSavedMaps();
 
@@ -107,6 +134,8 @@ int main(int argc, char* argv[])
 		//CHARACTER (relic): player.reset(); //the character points at the board, so remove it before replacing the board
 		GameBoard = std::make_unique<Board>(boardSize, boardSize, Vector2f(boardMargin, boardMargin));
 		GameBoard->boardname = mapNameBox.getText();
+		GameBoard->newMapSize = getNewMapSize(); //only used if the map doesn't exist yet
+		GameBoard->view = (MapView)viewDropdown.getSelectedIndex(); //keep the view chosen last time
 		GameBoard->importBoard(GameBoard->boardname); //cleans the name: "" -> "flat", "x.gridmap" -> "x"
 		//CHARACTER (relic, not used on the costmap branch):
 		//int initialPos;
@@ -119,6 +148,7 @@ int main(int argc, char* argv[])
 		//player = std::make_unique<Character>(*GameBoard, initialPos);
 		window.setTitle("Aidan's TileMap - " + GameBoard->boardname);
 		mapNameBox.setActive(false);
+		mapSizeBox.setActive(false);
 		gameState = PLAYING;
 	};
 
@@ -160,6 +190,7 @@ int main(int argc, char* argv[])
 					continue;
 				}
 				mapNameBox.handleEvent(event, mouse);
+				mapSizeBox.handleEvent(event, mouse);
 				if (leftClick && startButton.contains(mouse)) {
 					startGame();
 				}
@@ -175,6 +206,11 @@ int main(int argc, char* argv[])
 			}
 
 			// --- PLAYING ---
+			//the open view list sits on top of the map and panel, so it gets clicks first
+			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && viewDropdown.handleClick(mouse)) {
+				GameBoard->view = (MapView)viewDropdown.getSelectedIndex();
+				continue;
+			}
 			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && saveMenuButton.contains(mouse)) {
 				returnToMenu(true);
 				continue;
@@ -229,6 +265,7 @@ int main(int argc, char* argv[])
 				//V: show the next layer (Terrain, Cost, Traversability, Slope, Roughness, Step)
 				if (event.key.code == sf::Keyboard::V) {
 					GameBoard->cycleView();
+					viewDropdown.setSelectedIndex((int)GameBoard->view);
 				}
 				//CHARACTER (relic, not used on the costmap branch):
 				//if (event.key.code == sf::Keyboard::W) {
@@ -334,6 +371,9 @@ int main(int argc, char* argv[])
 			mapNameBox.draw(window);
 			window.draw(savedMapsText);
 			window.draw(algorithmLabel);
+			window.draw(sizeLabel);
+			mapSizeBox.draw(window);
+			window.draw(sizeHint);
 			startButton.draw(window, mouse);
 			algorithmDropdown.draw(window, mouse); //drawn last so its open list covers what is below it
 			window.display();
@@ -388,8 +428,10 @@ int main(int argc, char* argv[])
 			return out.str();
 		};
 		std::string info = "Map: " + GameBoard->boardname + (GameBoard->mapIsNew ? " (new)" : "") + "\n";
+		info += "Size: " + std::to_string(GameBoard->map.getColumns()) + " x " + std::to_string(GameBoard->map.getRows()) + " cells ("
+			+ toText(GameBoard->map.getColumns() * GameBoard->map.getResolution(), 1) + " m)\n";
 		info += "Algorithm: " + getPathAlgorithmName(algorithm) + "\n";
-		info += "View: " + getMapViewNames()[(int)GameBoard->view] + "  (V)\n\n";
+		info += "View (V):\n\n\n\n"; //the view dropdown is drawn in these lines
 		if (!(GameBoard->startExists && GameBoard->endExists)) {
 			info += "Place a start and an end:\nclick a cell, then pick\nStart or End\n";
 		}
@@ -418,6 +460,7 @@ int main(int argc, char* argv[])
 		panelText.setString(info);
 		window.draw(panelText);
 		saveMenuButton.draw(window, mouse);
+		viewDropdown.draw(window, mouse); //drawn last so its open list covers the map and panel
 		/* DRAW OBJECTS HERE */
 
 		window.display();

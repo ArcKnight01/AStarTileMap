@@ -110,10 +110,13 @@ Every layer of the map is saved (`cost`, `elevation`, `slope`, `roughness`, `ste
 
 ## Screens and controls
 
-**MENU:** the map name (text box), the algorithm (dropdown: A*, Dijkstra's, BFS, DFS) and **START**.
+**MENU:** the map name (text box), the algorithm (dropdown: A*, Dijkstra's, BFS, DFS), the **size of a new map** (cells per
+side, 5–180, at 0.1 m per cell) and **START**. The size is only used when the name is a new map; a saved map keeps its own size.
+The default is **36**: the map is 720 px wide, so each cell is exactly 20 px and the 20 × 20 sprites are drawn 1:1. 72 draws
+them at exactly half size (10 px) and 18 at double size (40 px); other sizes work but scale the sprites unevenly.
 
-**PLAYING:** the map with a 40 px margin, and the side panel: map, algorithm, view, path length (cells and metres), path cost,
-cells searched, and the controls.
+**PLAYING:** the map with a 40 px margin, and the side panel: map, size, algorithm, the **view dropdown**, path length (cells
+and metres), path cost, cells searched, and the controls.
 
 | Input | Effect |
 |---|---|
@@ -121,17 +124,21 @@ cells searched, and the controls.
 | **↑ / ↓** | Choose; the cell previews it |
 | **Left click** the same cell again, or **Enter** | Place it, and the path re-plans |
 | **Right click**, **Backspace** or **Esc** | Unselect (Esc goes back to the menu when nothing is selected) |
-| **V** | Change the view: **Terrain**, **Cost**, **Traversability**, **Slope**, **Roughness**, **Step** |
+| **V**, or the view dropdown | Change the view: **Terrain**, **Elevation**, **Cost**, **Traversability**, **Slope**, **Roughness**, **Step** |
 | **SAVE & MENU** button, or **E** | Save to `maps/<name>.gridmap` and go back to the menu |
 
-**The views:**
-- **Terrain:** height from the floor sprite's **brown** (lowest point of the map) to the wall sprite's **grey** (highest point).
+**The views.** Every cell is drawn with your sprites at cell size, as on `main`: lethal cells are the stone wall, every other
+cell is the floor sprite with its lights. Only the floor's **brown** changes with the view; the lights stay as indicators
+(green start, red end, blue path, purple searched). At load time each sprite is split into the floor's brown (kept as
+brightness, so it can be recoloured per cell) and its lights (the pixels that differ from `floorTile.png`).
+- **Terrain:** the floor's own brown on smooth ground (cost 0); rougher, costlier ground turns it **darker**, then slowly
+  **grey** like the wall (cost 0.5).
+- **Elevation:** green (lowest point of the map) → red (highest).
 - **Cost:** green (0) → yellow → red (0.5).
 - **Traversability:** green (1) → red (0).
 - **Slope / Roughness / Step:** green (0) → red (the critical value).
 
-In every view, **lethal cells are drawn with the stone wall texture**, unknown cells are black, searched cells are tinted
-purple, and the path is blue.
+Unknown cells have a black floor.
 
 Editing the map (painting terrain or costs) comes later. For now you place only the start and end.
 
@@ -203,7 +210,7 @@ it stands in for is Fankhauser et al.'s robot-centric elevation mapping (2014, 2
 | **A terrain piece** | A function in `core/TerrainGenerator` that adds to the `elevation` layer |
 | **A feature** | A `compute…()` in `core/TerrainFeatures` that writes a layer, then use it in `computeTraversability()` with a weight and critical value in `CostMapParameters` |
 | **An algorithm** | Add it to `enum class PathAlgorithm` and `getPathAlgorithmNames()` in `core/PathPlanner.h`, write a `pathfinding…()` in `PathPlanner.cpp`, and add a case to `findPath()`. The menu dropdown picks it up automatically. |
-| **A view** | Add it to `enum class MapView` and `getMapViewNames()` in `src/Tile.h`, and a case in `Board::getCellColor()` |
+| **A view** | Add it to `enum class MapView` and `getMapViewNames()` in `src/Tile.h`, and a case in `Board::getGroundColor()` (the colour of the floor's brown). The view dropdown picks it up automatically. |
 
 ### Not on this branch
 - **The character** (WASD movement) is a relic of TileMap. It is commented out in `main.cpp` and the CMake file, and its files

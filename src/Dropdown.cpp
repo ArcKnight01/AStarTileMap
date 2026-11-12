@@ -86,6 +86,10 @@ int Dropdown::getSelectedIndex() const {
 	return selected;
 }
 
+void Dropdown::setSelectedIndex(int index) {
+	if (index >= 0 && index < (int)options.size()) selected = index;
+}
+
 std::string Dropdown::getSelectedText() const {
 	return options.empty() ? "" : options[selected];
 }
