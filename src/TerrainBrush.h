@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -6,13 +7,23 @@
 // dropdowns). Board::setTerrainHeight() and Board::updateCostMap() (TerrainBrush.cpp) do the editing.
 //
 //   Left click: Place start / end -> click a cell, pick Start / End from the list (TilePlacement.cpp)
-//   Left click: Set terrain       -> click or drag: every cell under the brush gets the chosen height,
-//                                    then the cost map is rebuilt around those cells and the path is planned again
+//   Left click: Set terrain       -> click or drag: every cell under the brush moves toward the chosen height by
+//                                    a Gaussian weight (below), then the cost map is rebuilt around those cells
+//                                    and the path is planned again
 //
-// The heights are chosen against the critical values of CostMapParameters (step 0.12 m, slope 0.40 rad, 0.1 m cells):
-//   +-0.05 m stays walkable but costly (its edge is a 0.05 m step and a ~0.3 rad slope),
-//   +0.15 m and -0.20 m are steeper than a 0.12 m step, so their edges are lethal (and inflated by 0.2 m),
-//   +0.50 m is a wall, like the walls of the dungeon map.
+// How high a painted patch is sets the cost of its sides. Measured with one click of the Gaussian brush (below) on a
+// flat map, default CostMapParameters, 0.1 m cells (cN = worst walkable cost, L = the patch is lethal):
+//   brush          0.02 m   0.05 m   0.08 m   0.10 m   0.15 m   0.50 m
+//   1 cell         c0.17    c0.42    L        L        L        L
+//   3 x 3          c0.15    c0.39    L        L        L        L
+//   5 x 5          c0.11    c0.27    c0.43    L        L        L
+//   9 x 9          c0.07    c0.18    c0.28    c0.35    L        L
+// A wider brush spreads the same height over a gentler slope, so it can go higher before the slope reaches
+// criticalSlope (0.40 rad) and the traversability falls below 0.5 (lethal). The step limit (0.12 m) is never reached first.
+// The presets below stay walkable with every brush, except the wall.
+// (the first presets were -0.20 / -0.05 / 0 / +0.05 / +0.15 / +0.50 m with a hard-edged square brush: a height
+// difference of 0.06 m or more across one cell was lethal, so the pit and the ledge were walls too)
+// Up / Down change the brush height in brushHeightStep steps (Shift: brushHeightBigStep), so every cost is reachable.
 
 // What a left click on the map does.
 enum class ClickMode {
@@ -30,14 +41,17 @@ struct TerrainHeight {
 };
 inline std::vector<TerrainHeight> getTerrainHeights() {
 	return {
-		{ "Pit   -0.20 m", -0.20f },
-		{ "Low   -0.05 m", -0.05f },
-		{ "Ground 0.00 m",  0.00f },
-		{ "Bump  +0.05 m",  0.05f },
-		{ "Ledge +0.15 m",  0.15f },
-		{ "Wall  +0.50 m",  0.50f }
+		{ "Hollow -0.05 m", -0.05f }, //side cost ~0.2 - 0.4 (by brush width); was "Pit"
+		{ "Dip    -0.02 m", -0.02f }, //side cost ~0.1 - 0.2
+		{ "Ground  0.00 m",  0.00f }, //cost 0: smooths a mound or hollow back to flat (drag over it)
+		{ "Bump   +0.02 m",  0.02f }, //side cost ~0.1 - 0.2
+		{ "Mound  +0.05 m",  0.05f }, //side cost ~0.2 - 0.4; was "Ledge" (a Gaussian patch has no ledge)
+		{ "Wall   +0.50 m",  0.50f }  //lethal, like the walls of the dungeon map
 	};
 }
+// Up / Down change the brush height by this much (m); with Shift held, by the big step. 0.01 m is about 0.1 of edge cost.
+const float brushHeightStep = 0.01f;
+const float brushHeightBigStep = 0.05f;
 inline std::vector<std::string> getTerrainHeightNames() {
 	std::vector<std::string> names;
 	for (const TerrainHeight& height : getTerrainHeights()) {
@@ -52,4 +66,60 @@ inline std::vector<int> getBrushWidths() {
 }
 inline std::vector<std::string> getBrushNames() {
 	return { "1 cell", "3 x 3 cells", "5 x 5 cells", "9 x 9 cells" };
+}
+
+// The brush is a Gaussian: each brushed cell moves toward the chosen height by its kernel weight,
+//   z  <-  z + w * ( target - z ),     w = exp( -d^2 / ( 2 sigma^2 ) ),     sigma = brushSigmaPerWidth * width
+// so the centre (w = 1) reaches the target and the height falls off smoothly toward the brush's edge: a patch is a
+// smooth mound or hollow instead of a block with a vertical step around it. Moving toward the target (instead of adding
+// to the height) means dragging over the same cells again settles on the target instead of piling up.
+// The kernels are computed once per brush width (Board::brushKernels) and only looked up while painting.
+// sigma = width / 4 leaves exp( -2 ) ~ 0.14 at the middle of the brush's edge; a 1-cell brush is a single weight of 1.
+const float brushSigmaPerWidth = 0.25f;
+
+/**
+ * Compute the Gaussian weight at a distance from the brush centre.
+ *
+ * @param squaredDistance  Squared distance from the centre, in cells^2.
+ * @param sigma            Standard deviation of the Gaussian, in cells.
+ * @return                 Weight in ( 0, 1 ], 1 at the centre.
+ */
+inline float computeGaussianWeight(float squaredDistance, float sigma) {
+
+
+	// pseudo-code:
+	// w = exp( -d^2 / ( 2 sigma^2 ) )
+
+
+	return std::exp(-squaredDistance / (2.f * sigma * sigma));
+}
+
+/**
+ * Build the square Gaussian kernel of a brush.
+ *
+ * @param width  Side of the square brush, in cells (odd).
+ * @return       width * width weights, row by row (index = row * width + column), centre weight 1.
+ */
+inline std::vector<float> buildGaussianKernel(int width) {
+
+
+	// pseudo-code:
+	// k = ( width - 1 ) / 2,  sigma = brushSigmaPerWidth * width
+	// K[ r ][ c ] = computeGaussianWeight( ( c - k )^2 + ( r - k )^2, sigma )
+
+
+	int halfWidth = (width - 1) / 2;
+	float sigma   = brushSigmaPerWidth * width;
+	std::vector<float> kernel(width * width);
+
+
+	for (int row = 0; row < width; row++) {
+		for (int column = 0; column < width; column++) {
+			float squaredDistance = (float)((column - halfWidth) * (column - halfWidth) + (row - halfWidth) * (row - halfWidth));
+			kernel[row * width + column] = computeGaussianWeight(squaredDistance, sigma);
+		}
+	}
+
+
+	return kernel;
 }

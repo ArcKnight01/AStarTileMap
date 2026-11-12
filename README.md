@@ -113,7 +113,7 @@ Every layer of the map is saved (`cost`, `elevation`, `slope`, `roughness`, `ste
 ## Screens and controls
 
 **MENU:** the map name (text box), the algorithm (dropdown: A*, Dijkstra's, BFS, DFS), the **size of a new map** (cells per
-side, 5–180, at 0.1 m per cell) and **START**. The size is only used when the name is a new map; a saved map keeps its own size.
+side, 5–180, at 0.1 m per cell), **START** and **EXIT** (or Esc). The size is only used when the name is a new map; a saved map keeps its own size.
 The default is **36** (3.6 m): it fits a 1080p screen at 20 px cells, so the 20 × 20 sprites are drawn 1:1.
 
 **The window resizes to the map.** Each cell gets the biggest of 40, 20, 10 or 5 px that fits on your screen, so the sprites
@@ -128,9 +128,10 @@ cells searched, and the controls.
 |---|---|
 | **Algorithm** dropdown | Change the algorithm (A*, Dijkstra's, BFS, DFS); the path re-plans at once. The menu's choice is where it starts. |
 | **Left click** dropdown | **Place start / end** (the rows below) or **Set terrain** |
-| *Set terrain:* **left click** or **drag** | Every cell under the brush (outlined in cyan) gets the **height** chosen in the panel (pit −0.20 m, low −0.05 m, ground 0, bump +0.05 m, ledge +0.15 m, wall +0.50 m); the slope, roughness, step, traversability and cost are rebuilt around it and the path re-plans. **Brush**: 1, 3 × 3, 5 × 5 or 9 × 9 cells. Saved with the map. |
+| *Set terrain:* **left click** or **drag** | The cells under the brush (outlined in cyan) move toward the brush **height** by a Gaussian weight (1 at the centre, ~0.14 at the edge), so a patch is a smooth mound or hollow; the slope, roughness, step, traversability and cost are rebuilt around it and the path re-plans. **Height** presets: hollow −0.05 m, dip −0.02 m, ground 0, bump +0.02 m, mound +0.05 m (walkable with every brush), wall +0.50 m (lethal). **Brush**: 1, 3 × 3, 5 × 5 or 9 × 9 cells; a wider brush is a gentler slope, so it can go higher before it turns lethal (about 0.05 m for 3 × 3, 0.10 m for 9 × 9). Saved with the map. |
+| *Set terrain:* **↑ / ↓** | Raise / lower the brush height by 1 cm (**Shift**: 5 cm); about 0.1 of cost per cm. The panel shows the height. |
 | *Place start / end:* **left click** a cell | Select it. A list appears beside it: **Start** / **End** on any walkable cell (shown as **Move start** / **Move end** when they already exist), or **Clear** on the start or end cell. Lethal cells can't be selected. |
-| **↑ / ↓** | Choose; the cell previews it |
+| *Place start / end:* **↑ / ↓** | Choose; the cell previews it |
 | **Left click** the same cell again, or **Enter** | Place it, and the path re-plans |
 | **Right click**, **Backspace** or **Esc** | Unselect (Esc goes back to the menu when nothing is selected) |
 | **V**, or the view dropdown | Change the view: **Terrain**, **Elevation**, **Cost**, **Traversability**, **Slope**, **Roughness**, **Step** |

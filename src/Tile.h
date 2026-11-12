@@ -4,6 +4,7 @@
 #include <SFML/Graphics/Rect.hpp>
 // Include Needed for Text
 #include <SFML/Graphics/Text.hpp>
+#include <map>
 #include <vector>
 #include <string>
 #include "CostMapParameters.h"
@@ -108,12 +109,18 @@ public:
 	// With "Left click: Set terrain", a click or drag calls setTerrainHeight() on the cell under the mouse. The cost map
 	// is rebuilt once per frame by updateCostMap() (main() calls it when terrainEditedTiles is not empty), then re-planned.
 	std::vector<int> terrainEditedTiles; //cells whose elevation changed since the last updateCostMap()
+	std::map<int, std::vector<float>> brushKernels; //Gaussian kernel of each brush width (TerrainBrush.h), built once
 	/**
-	 * Set the elevation of every cell under a square brush centred on a cell.
+	 * Build the Gaussian kernel of every brush width offered in the Brush dropdown into brushKernels.
+	 */
+	void buildBrushKernels();
+	/**
+	 * Move the elevation of every cell under a square Gaussian brush centred on a cell toward a height:
+	 * z <- z + w * ( elevation - z ), with w the brush kernel's weight for that cell (1 at the centre).
 	 *
 	 * @param tile        Index of the cell under the mouse (row * columns + column).
-	 * @param elevation   New height of the brushed cells, in metres.
-	 * @param brushWidth  Side of the square brush, in cells (odd: 1, 3, 5, ...). Cells outside the map are skipped.
+	 * @param elevation   Target height of the brush, in metres (reached at the centre).
+	 * @param brushWidth  Side of the square brush, in cells (one of getBrushWidths()). Cells outside the map are skipped.
 	 * @return            Nothing. The brushed cells are added to terrainEditedTiles.
 	 */
 	void setTerrainHeight(int tile, float elevation, int brushWidth);

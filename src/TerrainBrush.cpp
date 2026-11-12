@@ -3,22 +3,38 @@
 #include <cmath>
 #include "CostMap.h"
 
-// Editing the "elevation" layer with a square brush (the "Set terrain" left-click mode), then rebuilding the cost map
+// Editing the "elevation" layer with a square Gaussian brush (the "Set terrain" left-click mode), then rebuilding the cost map
 // around the edit. See TerrainBrush.h for the choices offered in the side panel.
+
+void Board::buildBrushKernels() {
+
+
+	// pseudo-code:
+	// for each brush width w:  brushKernels[ w ] = buildGaussianKernel( w )
+
+
+	for (int width : getBrushWidths()) {
+		brushKernels[width] = buildGaussianKernel(width);
+	}
+}
 
 void Board::setTerrainHeight(int tile, float elevation, int brushWidth) {
 
 
 	// pseudo-code:
-	// (c0, r0) = cell of tile;  k = ( brushWidth - 1 ) / 2
+	// (c0, r0) = cell of tile;  k = ( brushWidth - 1 ) / 2;  K = brushKernels[ brushWidth ]
 	// for every cell (c, r) with |c - c0| <= k and |r - r0| <= k inside the map:
-	//     elevation(c, r) = elevation;  remember (c, r) as edited
+	//     w = K[ r - r0 + k ][ c - c0 + k ]
+	//     elevation(c, r) = elevation(c, r) + w * ( elevation - elevation(c, r) );  remember (c, r) as edited
+	//
+	// (was: elevation(c, r) = elevation for every cell of the square, which left a vertical step around the patch)
 
 
 	if (!map.hasLayer("elevation")) {
 		map.addLayer("elevation", 0.f); //a map made from a cost layer alone starts flat
 	}
-	std::vector<float>& heights = map.getLayer("elevation");
+	std::vector<float>& heights        = map.getLayer("elevation");
+	const std::vector<float>& kernel   = brushKernels[brushWidth];
 	int centerColumn = map.getColumn(tile);
 	int centerRow    = map.getRow(tile);
 	int halfWidth    = (brushWidth - 1) / 2;
@@ -27,8 +43,11 @@ void Board::setTerrainHeight(int tile, float elevation, int brushWidth) {
 	for (int row = centerRow - halfWidth; row <= centerRow + halfWidth; row++) {
 		for (int column = centerColumn - halfWidth; column <= centerColumn + halfWidth; column++) {
 			if (!map.isInside(column, row)) continue;
-			int index = map.getIndex(column, row);
-			heights[index] = elevation;
+			int index    = map.getIndex(column, row);
+			float weight = kernel[(row - centerRow + halfWidth) * brushWidth + (column - centerColumn + halfWidth)];
+			//an unknown (NaN) height has nothing to blend from, so it is set to the target
+			float current = GridMap::isUnknown(heights[index]) ? elevation : heights[index];
+			heights[index] = current + weight * (elevation - current);
 			terrainEditedTiles.push_back(index);
 		}
 	}

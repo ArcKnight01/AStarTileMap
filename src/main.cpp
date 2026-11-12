@@ -6,6 +6,7 @@
 // Include Needed for Text
 #include <SFML/Graphics/Text.hpp>
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -22,6 +23,7 @@ using namespace sf;
 //   MENU    --START (click it, or press Enter)----------> PLAYING
 //   PLAYING --SAVE & MENU (click it, or press E)--------> MENU  (saves the map first)
 //   PLAYING --Esc---------------------------------------> MENU  (without saving)
+//   MENU    --EXIT (click it, or press Esc)-------------> closes the program
 enum GameState {
 	MENU,
 	PLAYING
@@ -97,8 +99,13 @@ int main(int argc, char* argv[])
 		return std::max(Board::MIN_MAP_SIZE, std::min(Board::MAX_MAP_SIZE, size));
 	};
 
+	//START and EXIT side by side at the bottom of the menu
+	//(START was alone in the middle: startButton.setup(font, "START", Vector2f(windowW / 2, 705), Vector2f(300, 70), 40);)
 	Button startButton;
-	startButton.setup(font, "START", Vector2f(windowW / 2, 705), Vector2f(300, 70), 40);
+	startButton.setup(font, "START", Vector2f(windowW / 2 - 160, 705), Vector2f(300, 70), 40);
+	//closes the program (same as Esc on the menu)
+	Button exitButton;
+	exitButton.setup(font, "EXIT", Vector2f(windowW / 2 + 160, 705), Vector2f(300, 70), 40);
 
 	// --- PLAYING screen: side panel to the right of the map ---
 	Button saveMenuButton;
@@ -118,13 +125,23 @@ int main(int argc, char* argv[])
 	clickModeDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getClickModeNames());
 	//only shown with "Set terrain": the height the brush writes, and the brush size
 	Dropdown terrainHeightDropdown;
-	terrainHeightDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getTerrainHeightNames(), 4); //starts on Ledge +0.15 m
+	terrainHeightDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getTerrainHeightNames(), 4); //starts on Mound +0.05 m (was Ledge +0.15 m)
 	Dropdown brushDropdown;
 	brushDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getBrushNames(), 1);                //starts on 3 x 3 cells
 	ClickMode clickMode = ClickMode::PlaceStartEnd;
 	bool isPaintingTerrain = false; //the left button is held down in Set terrain mode: moving the mouse keeps painting
 	int lastPaintedTile = -1;       //so holding the mouse still doesn't paint the same cell every event
 	float panelLeft = 0;            //left edge of the side panel (set by layoutForMap())
+	//the height the brush paints (m): picking a preset in the Height dropdown sets it, Up / Down change it in 0.01 m
+	//steps (Shift: 0.05 m), so heights between the presets can be painted too
+	float brushElevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation;
+
+	//the brush height as shown in the panel, e.g. "+0.07 m"
+	auto getBrushElevationText = [&]() {
+		std::ostringstream out;
+		out << std::showpos << std::fixed << std::setprecision(2) << brushElevation << " m";
+		return out.str();
+	};
 
 	//the panel dropdowns that are showing, top to bottom, each with the label written above it in the panel text
 	auto getPanelDropdowns = [&]() {
@@ -134,7 +151,7 @@ int main(int argc, char* argv[])
 			{ "Left click:", &clickModeDropdown }
 		};
 		if (clickMode == ClickMode::SetTerrain) {
-			dropdowns.push_back({ "Height:", &terrainHeightDropdown });
+			dropdowns.push_back({ "Height: " + getBrushElevationText() + " (Up/Down)", &terrainHeightDropdown });
 			dropdowns.push_back({ "Brush:", &brushDropdown });
 		}
 		return dropdowns;
@@ -269,9 +286,15 @@ int main(int argc, char* argv[])
 		gameState = MENU;
 	};
 
-	//reads the panel dropdowns after one of them was used: a new algorithm re-plans, a new view is shown, and a new click
-	//mode shows or hides the terrain dropdowns (Height and Brush are read when painting)
-	auto applyPanelChoices = [&]() {
+	//reads the panel dropdowns after one of them (usedDropdown) was used: a new algorithm re-plans, a new view is shown, a
+	//new click mode shows or hides the terrain dropdowns, and a Height preset sets the brush height (Brush is read when
+	//painting)
+	auto applyPanelChoices = [&](Dropdown* usedDropdown) {
+		if (usedDropdown == &terrainHeightDropdown) {
+			brushElevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation;
+		}
+
+
 		PathAlgorithm chosenAlgorithm = (PathAlgorithm)panelAlgorithmDropdown.getSelectedIndex();
 		if (chosenAlgorithm != algorithm) {
 			algorithm = chosenAlgorithm;
@@ -299,14 +322,14 @@ int main(int argc, char* argv[])
 		for (std::pair<std::string, Dropdown*>& dropdown : dropdowns) {
 			if (!dropdown.second->isOpen()) continue;
 			if (dropdown.second->handleClick(mouse)) {
-				applyPanelChoices();
+				applyPanelChoices(dropdown.second);
 				return true;
 			}
 			break;
 		}
 		for (std::pair<std::string, Dropdown*>& dropdown : dropdowns) {
 			if (dropdown.second->handleClick(mouse)) {
-				applyPanelChoices();
+				applyPanelChoices(dropdown.second);
 				return true;
 			}
 		}
@@ -318,10 +341,26 @@ int main(int argc, char* argv[])
 		if (tile == -1 || tile == lastPaintedTile) {
 			return;
 		}
-		float elevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation;
+		//float elevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation; (was the preset only)
 		int brushWidth = getBrushWidths()[brushDropdown.getSelectedIndex()];
-		GameBoard->setTerrainHeight(tile, elevation, brushWidth);
+		GameBoard->setTerrainHeight(tile, brushElevation, brushWidth);
 		lastPaintedTile = tile;
+	};
+
+	//Set terrain: Up / Down raise or lower the brush height by one step. The height is rounded to whole centimetres so
+	//repeated steps don't drift (0.01 is not exact in binary); when it lands on a preset, the Height dropdown shows it.
+	auto changeBrushElevation = [&](float step) {
+
+
+		// pseudo-code:
+		// brushElevation = round( 100 * ( brushElevation + step ) ) / 100
+
+
+		brushElevation = std::round(100.f * (brushElevation + step)) / 100.f + 0.f; //+ 0.f turns -0.00 into +0.00
+		std::vector<TerrainHeight> presets = getTerrainHeights();
+		for (int i = 0; i < (int)presets.size(); i++) {
+			if (std::fabs(presets[i].elevation - brushElevation) < 0.001f) terrainHeightDropdown.setSelectedIndex(i);
+		}
 	};
 
 	// Run the Program while the Window is Open
@@ -364,6 +403,9 @@ int main(int argc, char* argv[])
 				mapSizeBox.handleEvent(event, mouse);
 				if (leftClick && startButton.contains(mouse)) {
 					startGame();
+				}
+				else if (leftClick && exitButton.contains(mouse)) {
+					window.close();
 				}
 				else if (event.type == sf::Event::KeyPressed) {
 					if (event.key.code == sf::Keyboard::Enter) {
@@ -421,12 +463,16 @@ int main(int argc, char* argv[])
 				//		GameBoard->enterWasPressed = true;
 				//	}
 				//}
-				//NEW controls: Up / Down choose what to place on the selected tile, Enter places it, Backspace unselects
+				//NEW controls: Up / Down choose what to place on the selected tile, Enter places it, Backspace unselects.
+				//With Set terrain, Up / Down raise / lower the brush height instead (Shift: bigger steps).
+				float heightStep = event.key.shift ? brushHeightBigStep : brushHeightStep;
 				if (event.key.code == sf::Keyboard::Up) {
-					GameBoard->movePlacementChoice(-1);
+					if (clickMode == ClickMode::SetTerrain) changeBrushElevation(+heightStep);
+					else GameBoard->movePlacementChoice(-1);
 				}
 				if (event.key.code == sf::Keyboard::Down) {
-					GameBoard->movePlacementChoice(+1);
+					if (clickMode == ClickMode::SetTerrain) changeBrushElevation(-heightStep);
+					else GameBoard->movePlacementChoice(+1);
 				}
 				if (event.key.code == sf::Keyboard::Enter) {
 					GameBoard->confirmPlacement();
@@ -564,6 +610,7 @@ int main(int argc, char* argv[])
 			mapSizeBox.draw(window);
 			window.draw(sizeHint);
 			startButton.draw(window, mouse);
+			exitButton.draw(window, mouse);
 			algorithmDropdown.draw(window, mouse); //drawn last so its open list covers what is below it
 			window.display();
 			continue;
@@ -656,8 +703,10 @@ int main(int argc, char* argv[])
 		info += "\nControls:\n";
 		if (clickMode == ClickMode::SetTerrain) {
 			info += "Click / drag: set height\n";
-			info += "V: change view\n";
-			info += "Esc: menu\n";
+			info += "Up / Down: height +-1 cm\n";
+			info += "  (Shift: +-5 cm)\n";
+			info += "V: view, Esc: menu\n";
+			//info += "V: change view\n"; info += "Esc: menu\n"; (one line now, to fit the panel)
 		}
 		else {
 			info += "Click: select a cell\n";

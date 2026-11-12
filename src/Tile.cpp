@@ -17,6 +17,7 @@ Board::Board(float height, float width, sf::Vector2f origin) {
 	boardW = width;
 	this->origin = origin;
 	loadSprites();
+	buildBrushKernels(); //the terrain brush's Gaussian kernels, computed once (TerrainBrush.cpp)
 	map = GridMap(newMapSize, newMapSize, 0.1);
 	updateGeometry();
 }
