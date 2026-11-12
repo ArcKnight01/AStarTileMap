@@ -123,7 +123,7 @@ int main()
 			
 			/* DEFINE EVENTS (i.e. KEY PRESS & RELEASE) HERE */
 			if (event.type == sf::Event::MouseButtonPressed) {
-				if (event.key.code == sf::Mouse::Left) {
+				if (event.mouseButton.button == sf::Mouse::Left) {
 					//Register a new mouse click for piece selection functions
 					GameBoard.newClick = true;
 					GameBoard.conversionReset = true;
@@ -134,7 +134,7 @@ int main()
 					GameBoard.clickPos = GameBoard.getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
 					// the position of mouse
 				}
-				if (event.key.code == sf::Mouse::Right) {
+				if (event.mouseButton.button == sf::Mouse::Right) {
 					//Register a new mouse click for piece selection functions
 					//Register a new mouse click for piece selection functions
 					GameBoard.newClick = true;
@@ -155,7 +155,7 @@ int main()
 				}
 			}
 			if (event.type == sf::Event::MouseButtonReleased) {
-				if (event.key.code == sf::Mouse::Right) {
+				if (event.mouseButton.button == sf::Mouse::Right) {
 					//Register a new mouse click for piece selection functions
 					GameBoard.newSpace = false;
 				}

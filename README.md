@@ -215,9 +215,11 @@ distance(a, b): dx, dy = |difference| in tiles
 
 ---
 
+## Fixed
+- Mouse buttons used to be read through `event.key.code` instead of `event.mouseButton.button`. That only worked because both fields
+  sit at the same memory offset. Now `event.mouseButton.button` (also fixed in TileMap and Checkers).
+
 ## Known issues (inherited from TileMap, left unchanged)
-- `main.cpp` reads mouse buttons through `event.key.code` instead of `event.mouseButton.button`. It works only because both fields sit at
-  the same memory offset. The compiler warns about it.
 - `getTileN()` / `getTilePos()` use `tilesPerCol` where they should use `tilesPerRow`. This is fine while the map is square.
 - `Character::updateNavigation()` doesn't bounds-check its 8 neighbours. On the outer row it reads outside `tileTypes`, which the wall border normally hides.
 - `Character::move()` slows down leftward and rightward motion differently. The negative-x branch adds friction twice and checks `moveUp/moveDown`.
