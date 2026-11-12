@@ -11,6 +11,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <algorithm>
+#include <filesystem>
+#include <cctype>
 #include "NavGraph.h"
 using namespace sf;
 using namespace std;

@@ -270,11 +270,32 @@ void Board::exportBoard(string name)
 void Board::importBoard(string& name) {
 	//create a new board or import a saved board
 	fstream file;
-	cout << "Enter name of map (size 20x20): ";
+
+	// list the saved maps so you know what you can type
+	vector<string> savedMaps;
+	std::error_code ec;
+	for (const auto& entry : std::filesystem::directory_iterator("maps", ec)) {
+		if (entry.path().extension() == ".txt") {
+			savedMaps.push_back(entry.path().stem().string());
+		}
+	}
+	std::sort(savedMaps.begin(), savedMaps.end());
+	cout << "Saved maps (20x20):";
+	for (const string& m : savedMaps) {
+		cout << " " << m;
+	}
+	cout << endl;
+	cout << "Type a map name and press Enter (Enter alone = default, a new name = new empty map): " << flush;
 	getline(cin, name);
 
 	vector<int> tileNumbers;
 	tileNumbers = std::vector<int>(tileCount);
+
+	// accept "dungeon", "dungeon.txt", "maps/dungeon" or "maps/dungeon.txt"
+	while (!name.empty() && isspace((unsigned char)name.back())) name.pop_back();
+	while (!name.empty() && isspace((unsigned char)name.front())) name.erase(0, 1);
+	if (name.rfind("maps/", 0) == 0) name = name.substr(5);
+	if (name.size() > 4 && name.substr(name.size() - 4) == ".txt") name.resize(name.size() - 4);
 
 	// If they enter no name, use a default
 	if (name == "") {
@@ -285,7 +306,7 @@ void Board::importBoard(string& name) {
 	file.open(filename, ios::in);
 	if (file.is_open()) {
 		// File exists, read data from file
-		cout << "File found, loading from file." << endl;
+		cout << "Loading " << filename << endl;
 
 		//file >> boardH;
 		//file >> boardW;
@@ -323,6 +344,7 @@ void Board::importBoard(string& name) {
 	}
 	else {
 		// File doesn't exist, have the user fill it in
+		cout << "No map named \"" << name << "\": starting an empty map. Press E to save it as " << filename << endl;
 		for (int i = 0; i < tileCount; i++) {
 			if (i % tilesPerRow == 0 || i % tilesPerRow == (tilesPerRow-1) || i / tilesPerCol == 0 || i/tilesPerCol == (tilesPerCol-1)) {
 				tileTypes[i] = wall;

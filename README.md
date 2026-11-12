@@ -42,9 +42,14 @@ cmake --build build
 ```bash
 cd build && ./AStarTileMap
 ```
-The program first asks **in the terminal** for a map name. Type `dungeon` (or `a`, `default`, `Unamed_Map`) and press
-Enter, or press Enter alone to load `default`. Then the window opens.
-A name that doesn't exist yet gives you a new empty map with a wall border. Press **E** to save it under that name.
+Unless you pass a map name (`./run.sh dungeon`), the program first **waits in the terminal** for one, and the window only opens
+after you answer. It lists the saved maps:
+```
+Saved maps (20x20): Unamed_Map a default dungeon
+Type a map name and press Enter (Enter alone = default, a new name = new empty map):
+```
+`dungeon`, `dungeon.txt` and `maps/dungeon` all work. A name that doesn't exist yet gives you a new empty map with a wall border;
+press **E** to save it under that name. Note that `a` has no start or end, so no path shows until you place them.
 
 ### From VS Code
 1. Open this folder in VS Code. Install the recommended **C/C++** and **CMake Tools** extensions if asked.
