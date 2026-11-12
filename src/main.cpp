@@ -24,15 +24,19 @@ int main()
 {
 
 
-	// Create a Window to Display Graphics, Define Size and Window Name
-	sf::RenderWindow window(sf::VideoMode(windowW, windowH), "Aidan's TileMap");
+	// The window object exists now but is only opened (window.create below) after the
+	// map name has been typed in the terminal, so no empty window sits there waiting.
+	sf::RenderWindow window;
 
 
 	/* CREATE OBJECTS AND ASSIGN OBJECT ATTRIBUTES HERE */
 	Board GameBoard(window, windowW, windowH, tilesPerRow, tilesPerCol);
-	
+
 	/* CREATE OBJECTS AND ASSIGN OBJECT ATTRIBUTES HERE */
 	GameBoard.importBoard(GameBoard.boardname);
+
+	// Open the Window to Display Graphics, Define Size and Window Name
+	window.create(sf::VideoMode(windowW, windowH), "Aidan's TileMap - " + GameBoard.boardname);
 	int initialPos;
 	if (GameBoard.startExists) {
 		initialPos = GameBoard.startPos;
