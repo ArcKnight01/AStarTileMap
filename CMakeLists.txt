@@ -26,6 +26,7 @@ add_executable(AStarTileMap
   src/main.cpp
   src/Tile.cpp
   src/TilePlacement.cpp
+  src/TerrainBrush.cpp
   src/Button.cpp
   src/TextBox.cpp
   src/Dropdown.cpp

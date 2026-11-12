@@ -14,6 +14,12 @@ public:
 
 	int getSelectedIndex() const;
 	void setSelectedIndex(int index); //e.g. when a key changes the same setting
+	/**
+	 * Move the dropdown, keeping its size, options and selection (e.g. when the side panel is laid out again).
+	 *
+	 * @param center  New centre of the closed box, in window coordinates.
+	 */
+	void setCenter(sf::Vector2f center);
 	std::string getSelectedText() const;
 	bool isOpen() const;
 

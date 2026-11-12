@@ -12,7 +12,7 @@
 //   h(a, b) = Euclidean distance in cells (eq. 3.1): 1 for a straight step, sqrt(2) for a diagonal one.
 // Because every cost is >= 0, h never overestimates, so A* still finds the cheapest path.
 
-// The algorithms the menu's dropdown can choose from.
+// The algorithms the menu's dropdown (and the PLAYING side panel's dropdown) can choose from.
 // To add one: add it here and to getPathAlgorithmNames() (same order), write a pathfinding...() function in
 // PathPlanner.cpp, and call it from findPath().
 enum class PathAlgorithm {

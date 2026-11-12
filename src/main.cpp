@@ -36,6 +36,8 @@ const float panelWidth = 260;  //the side panel right of the map
 //20 x 20 sprites are always drawn at a clean scale (x2, x1, x1/2, x1/4); only a map too big even for 5 px cells is
 //squeezed to fit.
 const float cellSizes[] = { 40, 20, 10, 5 };
+//height of one line of the side panel text (19 pt Candal), used to place the panel dropdowns in the gaps left in the text
+const float panelLineHeight = 25;
 
 //places a text so that its centre is at (x, y)
 void centerText(Text& text, float x, float y) {
@@ -102,16 +104,80 @@ int main(int argc, char* argv[])
 	Button saveMenuButton;
 	//(positioned by layoutForMap() when a map starts)
 	Text panelText("", font, 19);
-	//the view (same as pressing V); it sits in the gap left under the "View (V):" line of the panel text
+	//Each panel dropdown sits in a gap of two empty lines left under its label in the panel text (placed by layoutPanel()).
+	//(was 240 x 40 with three empty lines per gap; 36 px tall fits two lines, so the panel has room for five dropdowns)
+	const Vector2f panelDropdownSize(240, 36);
+	//the path algorithm, changeable while playing (the menu's dropdown picks the first one). Changing it re-plans at once.
+	Dropdown panelAlgorithmDropdown;
+	panelAlgorithmDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getPathAlgorithmNames());
+	//the view (same as pressing V)
 	Dropdown viewDropdown;
-	viewDropdown.setup(font, Vector2f(0, 0), Vector2f(240, 40), getMapViewNames());
+	viewDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getMapViewNames());
+	//what a left click on the map does: place the start / end, or set terrain (TerrainBrush.h)
+	Dropdown clickModeDropdown;
+	clickModeDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getClickModeNames());
+	//only shown with "Set terrain": the height the brush writes, and the brush size
+	Dropdown terrainHeightDropdown;
+	terrainHeightDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getTerrainHeightNames(), 4); //starts on Ledge +0.15 m
+	Dropdown brushDropdown;
+	brushDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getBrushNames(), 1);                //starts on 3 x 3 cells
+	ClickMode clickMode = ClickMode::PlaceStartEnd;
+	bool isPaintingTerrain = false; //the left button is held down in Set terrain mode: moving the mouse keeps painting
+	int lastPaintedTile = -1;       //so holding the mouse still doesn't paint the same cell every event
+	float panelLeft = 0;            //left edge of the side panel (set by layoutForMap())
 
-	//resizes the window to a window (width x height) and keeps it on the screen, with 1 drawing unit = 1 pixel
+	//the panel dropdowns that are showing, top to bottom, each with the label written above it in the panel text
+	auto getPanelDropdowns = [&]() {
+		std::vector<std::pair<std::string, Dropdown*>> dropdowns = {
+			{ "Algorithm:", &panelAlgorithmDropdown },
+			{ "View (V):", &viewDropdown },
+			{ "Left click:", &clickModeDropdown }
+		};
+		if (clickMode == ClickMode::SetTerrain) {
+			dropdowns.push_back({ "Height:", &terrainHeightDropdown });
+			dropdowns.push_back({ "Brush:", &brushDropdown });
+		}
+		return dropdowns;
+	};
+	//the first panel dropdown's label is on this line of the panel text (after "Map:" and "Size:"), and each dropdown
+	//takes three lines: its label and the two-line gap the dropdown is drawn in
+	const int firstPanelDropdownLine = 2, panelDropdownLines = 3;
+	//places each showing dropdown in the gap under its label; called when the map starts and when the click mode changes
+	auto layoutPanel = [&]() {
+		std::vector<std::pair<std::string, Dropdown*>> dropdowns = getPanelDropdowns();
+		for (int i = 0; i < (int)dropdowns.size(); i++) {
+			float labelTop = boardMargin + (firstPanelDropdownLine + i * panelDropdownLines) * panelLineHeight;
+			dropdowns[i].second->setCenter(Vector2f(panelLeft + panelDropdownSize.x / 2, labelTop + panelLineHeight + panelDropdownSize.y / 2 + 2));
+		}
+	};
+
+	//Window size. Each screen is laid out in a fixed area (layoutW x layoutH drawing units). The program sizes the window
+	//to that area itself until the user resizes or maximizes it; after that it keeps the user's size and fits the area into
+	//the window (same aspect, centred, bars on the sides). It must not call setSize() then: a maximized window refuses it,
+	//but SFML still stores the refused size as the window's size (and no Resized event comes to correct it), so it would
+	//draw into one corner and map the mouse wrongly.
+	float layoutW = windowW, layoutH = windowH;
+	Vector2u windowSize = window.getSize(); //the real size, kept up to date by Resized events
+	bool userSizedWindow = false;
+	//fits the layout area into the window, keeping its aspect ratio (1 drawing unit = 1 pixel when the sizes match)
+	auto applyView = [&]() {
+		View view(FloatRect(0, 0, layoutW, layoutH));
+		float scale = std::min(windowSize.x / layoutW, windowSize.y / layoutH);
+		float viewportW = layoutW * scale / windowSize.x, viewportH = layoutH * scale / windowSize.y;
+		view.setViewport(FloatRect((1 - viewportW) / 2, (1 - viewportH) / 2, viewportW, viewportH));
+		window.setView(view);
+	};
+	//switches to a layout area of width x height: resizes the window to it (keeping it on the screen), unless the user has sized the window
 	auto resizeWindow = [&](float width, float height) {
-		window.setSize(Vector2u((unsigned int)width, (unsigned int)height));
-		window.setView(View(FloatRect(0, 0, width, height)));
-		VideoMode desktop = VideoMode::getDesktopMode();
-		window.setPosition(Vector2i(std::max(0, ((int)desktop.width - (int)width) / 2), std::max(0, ((int)desktop.height - (int)height) / 2)));
+		layoutW = width;
+		layoutH = height;
+		if (!userSizedWindow) {
+			windowSize = Vector2u((unsigned int)width, (unsigned int)height);
+			window.setSize(windowSize);
+			VideoMode desktop = VideoMode::getDesktopMode();
+			window.setPosition(Vector2i(std::max(0, ((int)desktop.width - (int)width) / 2), std::max(0, ((int)desktop.height - (int)height) / 2)));
+		}
+		applyView();
 	};
 
 	//PLAYING layout for the loaded map: cell size, window size, the board's place, and the side panel
@@ -132,9 +198,12 @@ int main(int argc, char* argv[])
 		float playH = std::max(windowH, boardPixelsH + 2 * boardMargin);
 		board.setScreenArea(boardPixelsW, boardPixelsH, Vector2f(boardMargin, (playH - boardPixelsH) / 2));
 		resizeWindow(playW, playH);
-		float panelLeft = 2 * boardMargin + boardPixelsW;
+		panelLeft = 2 * boardMargin + boardPixelsW;
 		panelText.setPosition(panelLeft, boardMargin);
-		viewDropdown.setup(font, Vector2f(panelLeft + 120, boardMargin + 4 * 25 + 25), Vector2f(240, 40), getMapViewNames(), viewDropdown.getSelectedIndex());
+		//(the view dropdown was set up here at boardMargin + 4 * 25 + 25, under "View (V):" on line 3, before the
+		//algorithm and terrain dropdowns were added; layoutPanel() now places them all)
+		//viewDropdown.setup(font, Vector2f(panelLeft + 120, boardMargin + 4 * 25 + 25), Vector2f(240, 40), getMapViewNames(), viewDropdown.getSelectedIndex());
+		layoutPanel();
 		saveMenuButton.setup(font, "SAVE & MENU", Vector2f(panelLeft + panelWidth / 2, playH - boardMargin - 40), Vector2f(240, 70), 26);
 	};
 
@@ -163,6 +232,7 @@ int main(int argc, char* argv[])
 	//MENU -> PLAYING: load (or create) the map named in the text box
 	auto startGame = [&]() {
 		algorithm = (PathAlgorithm)algorithmDropdown.getSelectedIndex();
+		panelAlgorithmDropdown.setSelectedIndex(algorithmDropdown.getSelectedIndex()); //the panel starts on the menu's choice
 		//CHARACTER (relic): player.reset(); //the character points at the board, so remove it before replacing the board
 		GameBoard = std::make_unique<Board>(windowH - 2 * boardMargin, windowH - 2 * boardMargin, Vector2f(boardMargin, boardMargin));
 		GameBoard->boardname = mapNameBox.getText();
@@ -191,10 +261,67 @@ int main(int argc, char* argv[])
 			GameBoard->exportBoard(GameBoard->boardname);
 		}
 		mapNameBox.setText(GameBoard->boardname); //so START reopens the same map
+		algorithmDropdown.setSelectedIndex((int)algorithm); //and with the algorithm last chosen in the panel
+		isPaintingTerrain = false;
 		refreshSavedMaps();
 		window.setTitle("Aidan's TileMap");
 		resizeWindow(windowW, windowH); //back to the menu's size
 		gameState = MENU;
+	};
+
+	//reads the panel dropdowns after one of them was used: a new algorithm re-plans, a new view is shown, and a new click
+	//mode shows or hides the terrain dropdowns (Height and Brush are read when painting)
+	auto applyPanelChoices = [&]() {
+		PathAlgorithm chosenAlgorithm = (PathAlgorithm)panelAlgorithmDropdown.getSelectedIndex();
+		if (chosenAlgorithm != algorithm) {
+			algorithm = chosenAlgorithm;
+			GameBoard->navDirty = true;
+		}
+
+
+		GameBoard->view = (MapView)viewDropdown.getSelectedIndex();
+
+
+		ClickMode chosenClickMode = (ClickMode)clickModeDropdown.getSelectedIndex();
+		if (chosenClickMode != clickMode) {
+			clickMode = chosenClickMode;
+			GameBoard->cancelPlacement(); //a cell selected for Start / End no longer applies
+			isPaintingTerrain = false;
+			layoutPanel();
+		}
+	};
+
+	//gives a left click to the panel dropdowns; true when one of them used it (so the map must not react to it).
+	//An open list covers what is below it, so it gets the click first; a click outside it closes it and goes on to the
+	//closed boxes (top to bottom), so clicking another box while a list is open opens that one.
+	auto handlePanelClick = [&](Vector2f mouse) {
+		std::vector<std::pair<std::string, Dropdown*>> dropdowns = getPanelDropdowns();
+		for (std::pair<std::string, Dropdown*>& dropdown : dropdowns) {
+			if (!dropdown.second->isOpen()) continue;
+			if (dropdown.second->handleClick(mouse)) {
+				applyPanelChoices();
+				return true;
+			}
+			break;
+		}
+		for (std::pair<std::string, Dropdown*>& dropdown : dropdowns) {
+			if (dropdown.second->handleClick(mouse)) {
+				applyPanelChoices();
+				return true;
+			}
+		}
+		return false;
+	};
+
+	//Set terrain: paints the cell under the mouse (and its brush neighbours) with the chosen height
+	auto paintTerrain = [&](int tile) {
+		if (tile == -1 || tile == lastPaintedTile) {
+			return;
+		}
+		float elevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation;
+		int brushWidth = getBrushWidths()[brushDropdown.getSelectedIndex()];
+		GameBoard->setTerrainHeight(tile, elevation, brushWidth);
+		lastPaintedTile = tile;
 	};
 
 	// Run the Program while the Window is Open
@@ -215,6 +342,16 @@ int main(int argc, char* argv[])
 			// When X Button Clicked, Close Window
 			if (event.type == sf::Event::Closed)
 				window.close();
+			//the window was resized or maximized (by the user, or by the window manager instead of our setSize()):
+			//keep that size from now on and fit the layout into it
+			if (event.type == sf::Event::Resized) {
+				windowSize = Vector2u(event.size.width, event.size.height);
+				if (windowSize != Vector2u((unsigned int)layoutW, (unsigned int)layoutH)) {
+					userSizedWindow = true;
+				}
+				applyView();
+				continue;
+			}
 
 			/* DEFINE EVENTS (i.e. KEY PRESS & RELEASE) HERE */
 			if (gameState == MENU) {
@@ -240,9 +377,10 @@ int main(int argc, char* argv[])
 			}
 
 			// --- PLAYING ---
-			//the open view list sits on top of the map and panel, so it gets clicks first
-			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && viewDropdown.handleClick(mouse)) {
-				GameBoard->view = (MapView)viewDropdown.getSelectedIndex();
+			//the panel dropdowns (algorithm, view, left click, height, brush): an open list sits on top of the map and
+			//panel, so they get clicks first
+			//(was only the view dropdown: if (... && viewDropdown.handleClick(mouse)) { GameBoard->view = ...; continue; })
+			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && handlePanelClick(mouse)) {
 				continue;
 			}
 			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && saveMenuButton.contains(mouse)) {
@@ -355,7 +493,15 @@ int main(int argc, char* argv[])
 					//NEW controls: click a tile to select it; click the same tile again to place the previewed type.
 					//Clicking a different tile moves the selection there; clicks outside the map are ignored.
 					int clickedTile = GameBoard->getTileN(mouse.x, mouse.y);
-					if (clickedTile != -1) {
+					//Set terrain: the click paints, and painting goes on while the button is held (MouseMoved below)
+					if (clickMode == ClickMode::SetTerrain) {
+						if (clickedTile != -1) {
+							isPaintingTerrain = true;
+							lastPaintedTile = -1;
+							paintTerrain(clickedTile);
+						}
+					}
+					else if (clickedTile != -1) {
 						if (GameBoard->isPlacing && clickedTile == GameBoard->placingTile) {
 							GameBoard->confirmPlacement();
 						}
@@ -387,6 +533,15 @@ int main(int argc, char* argv[])
 					GameBoard->cancelPlacement();
 				}
 			}
+			//Set terrain: dragging with the left button held paints every cell the mouse passes over; releasing it stops
+			//(the event's own position, not the frame's mouse, so a fast drag paints every cell it crossed between frames)
+			if (event.type == sf::Event::MouseMoved && isPaintingTerrain) {
+				Vector2f dragPosition = window.mapPixelToCoords(Vector2i(event.mouseMove.x, event.mouseMove.y));
+				paintTerrain(GameBoard->getTileN(dragPosition.x, dragPosition.y));
+			}
+			if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left) {
+				isPaintingTerrain = false;
+			}
 			//OLD controls (right-click release)
 			//if (event.type == sf::Event::MouseButtonReleased) {
 			//	if (event.mouseButton.button == sf::Mouse::Right) {
@@ -417,12 +572,21 @@ int main(int argc, char* argv[])
 		// --- PLAYING ---
 		//OLD controls: convertTile() applied the Space / Enter edits; tiles are now placed with Board::confirmPlacement()
 		//GameBoard->convertTile();
+		if (!GameBoard->terrainEditedTiles.empty()) {
+			//the terrain was painted this frame: rebuild the cost around the painted cells (once per frame, however many
+			//cells a drag crossed); this marks the plan out of date, so it is re-planned just below
+			GameBoard->updateCostMap();
+		}
 		if (GameBoard->navDirty) {
 			//start / end changed (or a map was loaded): re-plan on the cost layer with the chosen algorithm;
 			//searched cells are tinted purple, the path is blue
 			GameBoard->replan(algorithm);
 		}
 		GameBoard->drawBoard(window);
+		//Set terrain: outline the cells the brush would paint under the mouse
+		if (clickMode == ClickMode::SetTerrain) {
+			GameBoard->drawTerrainBrush(window, GameBoard->leftMousePos, getBrushWidths()[brushDropdown.getSelectedIndex()]);
+		}
 		//CHARACTER (relic, not used on the costmap branch):
 		//player->update();
 		//player->drawCharacter(window);
@@ -465,8 +629,12 @@ int main(int argc, char* argv[])
 		std::string info = "Map: " + GameBoard->boardname + (GameBoard->mapIsNew ? " (new)" : "") + "\n";
 		info += "Size: " + std::to_string(GameBoard->map.getColumns()) + " x " + std::to_string(GameBoard->map.getRows()) + " cells ("
 			+ toText(GameBoard->map.getColumns() * GameBoard->map.getResolution(), 1) + " m)\n";
-		info += "Algorithm: " + getPathAlgorithmName(algorithm) + "\n";
-		info += "View (V):\n\n\n\n"; //the view dropdown is drawn in these lines
+		//info += "Algorithm: " + getPathAlgorithmName(algorithm) + "\n"; (was text only; now a dropdown)
+		//info += "View (V):\n\n\n\n"; (was the only dropdown gap)
+		//each showing dropdown's label, then the two empty lines it is drawn in (layoutPanel() uses the same order)
+		for (const std::pair<std::string, Dropdown*>& dropdown : getPanelDropdowns()) {
+			info += dropdown.first + "\n\n\n";
+		}
 		if (!(GameBoard->startExists && GameBoard->endExists)) {
 			info += "Place a start and an end:\nclick a cell, then pick\nStart or End\n";
 		}
@@ -486,16 +654,28 @@ int main(int argc, char* argv[])
 			info += "Searched: " + std::to_string(GameBoard->searchedTiles.size()) + " cells\n";
 		}
 		info += "\nControls:\n";
-		info += "Click: select a cell\n";
-		info += "Up / Down: choose\n";
-		info += "Click again / Enter: place\n";
-		info += "Right-click / Backspace:\n  unselect\n";
-		info += "V: change view\n";
-		info += "Esc: unselect, then menu\n";
+		if (clickMode == ClickMode::SetTerrain) {
+			info += "Click / drag: set height\n";
+			info += "V: change view\n";
+			info += "Esc: menu\n";
+		}
+		else {
+			info += "Click: select a cell\n";
+			info += "Up / Down: choose\n";
+			info += "Click again / Enter: place\n";
+			info += "Right-click / Backspace:\n  unselect\n";
+			info += "V: change view\n";
+			info += "Esc: unselect, then menu\n";
+		}
 		panelText.setString(info);
 		window.draw(panelText);
 		saveMenuButton.draw(window, mouse);
-		viewDropdown.draw(window, mouse); //drawn last so its open list covers the map and panel
+		//viewDropdown.draw(window, mouse); (was drawn alone, last)
+		//the dropdowns are drawn last, bottom one first, so an open list covers the map, the panel and the dropdowns below it
+		std::vector<std::pair<std::string, Dropdown*>> panelDropdowns = getPanelDropdowns();
+		for (int i = (int)panelDropdowns.size() - 1; i >= 0; i--) {
+			panelDropdowns[i].second->draw(window, mouse);
+		}
 		/* DRAW OBJECTS HERE */
 
 		window.display();

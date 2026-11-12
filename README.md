@@ -120,12 +120,16 @@ The default is **36** (3.6 m): it fits a 1080p screen at 20 px cells, so the 20 
 are always at a clean scale (×2, ×1, ×½, ×¼); only a map too big even for 5 px cells is squeezed to fit. A map smaller than
 the side panel is centred vertically. The window goes back to the menu's size on the way out.
 
-**PLAYING:** the map with a 40 px margin (the window sized to it), and the side panel: map, size, algorithm, the **view dropdown**, path length (cells
-and metres), path cost, cells searched, and the controls.
+**PLAYING:** the map with a 40 px margin (the window sized to it), and the side panel: map, size, the **algorithm**, **view**
+and **left click** dropdowns (plus **height** and **brush** with *Set terrain*), path length (cells and metres), path cost,
+cells searched, and the controls.
 
 | Input | Effect |
 |---|---|
-| **Left click** a cell | Select it. A list appears beside it: **Start** / **End** on any walkable cell (shown as **Move start** / **Move end** when they already exist), or **Clear** on the start or end cell. Lethal cells can't be selected. |
+| **Algorithm** dropdown | Change the algorithm (A*, Dijkstra's, BFS, DFS); the path re-plans at once. The menu's choice is where it starts. |
+| **Left click** dropdown | **Place start / end** (the rows below) or **Set terrain** |
+| *Set terrain:* **left click** or **drag** | Every cell under the brush (outlined in cyan) gets the **height** chosen in the panel (pit −0.20 m, low −0.05 m, ground 0, bump +0.05 m, ledge +0.15 m, wall +0.50 m); the slope, roughness, step, traversability and cost are rebuilt around it and the path re-plans. **Brush**: 1, 3 × 3, 5 × 5 or 9 × 9 cells. Saved with the map. |
+| *Place start / end:* **left click** a cell | Select it. A list appears beside it: **Start** / **End** on any walkable cell (shown as **Move start** / **Move end** when they already exist), or **Clear** on the start or end cell. Lethal cells can't be selected. |
 | **↑ / ↓** | Choose; the cell previews it |
 | **Left click** the same cell again, or **Enter** | Place it, and the path re-plans |
 | **Right click**, **Backspace** or **Esc** | Unselect (Esc goes back to the menu when nothing is selected) |
@@ -164,6 +168,7 @@ core/
   PathPlanner.h/.cpp        A* (pathfindingAstar), Dijkstra's, BFS, DFS on the cost layer
 tools/generate_maps.cpp     builds the example maps
 src/                        the SFML app (menu, Board = map view, Button, TextBox, Dropdown)
+  TerrainBrush.h/.cpp       the Set terrain mode: height / brush choices, Board::setTerrainHeight, Board::updateCostMap
 ```
 
 1. **Features** (`TerrainFeatures`). Each one looks at a circular window around the cell:
@@ -214,7 +219,7 @@ it stands in for is Fankhauser et al.'s robot-centric elevation mapping (2014, 2
 | **A map** | Write a builder in `tools/generate_maps.cpp` from the `TerrainGenerator` pieces (or set the `cost` layer directly), save it with `saveGridMap`, and run `./build/generate_maps`. |
 | **A terrain piece** | A function in `core/TerrainGenerator` that adds to the `elevation` layer |
 | **A feature** | A `compute…()` in `core/TerrainFeatures` that writes a layer, then use it in `computeTraversability()` with a weight and critical value in `CostMapParameters` |
-| **An algorithm** | Add it to `enum class PathAlgorithm` and `getPathAlgorithmNames()` in `core/PathPlanner.h`, write a `pathfinding…()` in `PathPlanner.cpp`, and add a case to `findPath()`. The menu dropdown picks it up automatically. |
+| **An algorithm** | Add it to `enum class PathAlgorithm` and `getPathAlgorithmNames()` in `core/PathPlanner.h`, write a `pathfinding…()` in `PathPlanner.cpp`, and add a case to `findPath()`. The menu and side panel dropdowns pick it up automatically. |
 | **A view** | Add it to `enum class MapView` and `getMapViewNames()` in `src/Tile.h`, and a case in `Board::getGroundColor()` (the colour of the floor's brown). The view dropdown picks it up automatically. |
 
 ### Not on this branch

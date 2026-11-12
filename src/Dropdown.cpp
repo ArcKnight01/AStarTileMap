@@ -90,6 +90,16 @@ void Dropdown::setSelectedIndex(int index) {
 	if (index >= 0 && index < (int)options.size()) selected = index;
 }
 
+void Dropdown::setCenter(sf::Vector2f center) {
+
+
+	// pseudo-code:
+	// topLeft = center - size / 2
+
+
+	topLeft = sf::Vector2f(center.x - size.x / 2, center.y - size.y / 2);
+}
+
 std::string Dropdown::getSelectedText() const {
 	return options.empty() ? "" : options[selected];
 }

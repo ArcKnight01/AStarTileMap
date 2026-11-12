@@ -9,6 +9,7 @@
 #include "CostMapParameters.h"
 #include "GridMap.h"
 #include "PathPlanner.h"
+#include "TerrainBrush.h"
 using namespace sf;
 using namespace std;
 
@@ -102,6 +103,38 @@ public:
 	void cancelPlacement();
 	static string getPlacementName(PlacementOption option);
 	string getPlacementLabel(PlacementOption option) const; //as shown in the list: "Move start" when the start exists
+
+	// --- editing the terrain with a brush (TerrainBrush.cpp) ---
+	// With "Left click: Set terrain", a click or drag calls setTerrainHeight() on the cell under the mouse. The cost map
+	// is rebuilt once per frame by updateCostMap() (main() calls it when terrainEditedTiles is not empty), then re-planned.
+	std::vector<int> terrainEditedTiles; //cells whose elevation changed since the last updateCostMap()
+	/**
+	 * Set the elevation of every cell under a square brush centred on a cell.
+	 *
+	 * @param tile        Index of the cell under the mouse (row * columns + column).
+	 * @param elevation   New height of the brushed cells, in metres.
+	 * @param brushWidth  Side of the square brush, in cells (odd: 1, 3, 5, ...). Cells outside the map are skipped.
+	 * @return            Nothing. The brushed cells are added to terrainEditedTiles.
+	 */
+	void setTerrainHeight(int tile, float elevation, int brushWidth);
+	/**
+	 * Rebuild the derived layers (slope, roughness, step, traversability, cost) around the cells in terrainEditedTiles.
+	 *
+	 * The whole pipeline is run on a copy of the map, and only the cells an edit can reach are copied back, so on a map
+	 * built by the pipeline the result equals a full re-run, while a map whose cost layer was written directly (dungeon)
+	 * keeps its cost everywhere else.
+	 *
+	 * @return  Nothing. Clears terrainEditedTiles and sets navDirty so the path is planned again.
+	 */
+	void updateCostMap();
+	/**
+	 * Draw the outline of the square brush around a cell (the cells setTerrainHeight() would change).
+	 *
+	 * @param window      Window to draw into.
+	 * @param tile        Index of the cell under the mouse (-1 draws nothing).
+	 * @param brushWidth  Side of the square brush, in cells.
+	 */
+	void drawTerrainBrush(sf::RenderWindow& window, int tile, int brushWidth);
 
 	//size of a new map (cells per side) when importBoard() finds no saved map; set from the menu. Saved maps keep their size.
 	int newMapSize = DEFAULT_MAP_SIZE;
