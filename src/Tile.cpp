@@ -54,10 +54,14 @@ Board::Board(sf::RenderWindow& window, float height, float width, int tilesInRow
 	pathSprite.setTextureRect(rect[1]);
 	pathSprite.setScale(tileW / 20, tileH / 20);
 
+	searchedTexture.loadFromFile("Textures/light_purple.png");
+	searchedSprite.setTexture(searchedTexture);
+	searchedSprite.setTextureRect(rect[1]);
+	searchedSprite.setScale(tileW / 20, tileH / 20);
+
 	for (int i = 0; i < tileCount; i++) {
 			tileTypes[i] = ground;
 	}
-	pathfinding(getTilePos(1), getTilePos(9));
 }
 
 void Board::drawBoard(sf::RenderWindow& window) {
@@ -77,7 +81,14 @@ void Board::drawBoard(sf::RenderWindow& window) {
 		window.draw(*sprite);
 	}
 
-	//2) light up the path (blue sprite); start/end keep their green/red sprites
+	//2) light up the tiles A* searched (purple), then the path itself (blue) on top;
+	//   start/end keep their green/red sprites
+	for (int i : searchedTiles) {
+		if (i >= 0 && i < tileCount && tileTypes[i] != startnode && tileTypes[i] != endnode && tileTypes[i] != wall) {
+			searchedSprite.setPosition(getTilePos(i));
+			window.draw(searchedSprite);
+		}
+	}
 	for (int i : pathTiles) {
 		if (i >= 0 && i < tileCount && tileTypes[i] != startnode && tileTypes[i] != endnode && tileTypes[i] != wall) {
 			pathSprite.setPosition(getTilePos(i));
@@ -327,49 +338,110 @@ void Board::importBoard(string& name) {
 	}
 	navDirty = true; //new map loaded, rebuild the nav graph
 }
-void Board::pathfinding(Vector2f positionA, Vector2f positionB)
+// Distance between two tiles in A* cost units: 10 per straight step, 14 per diagonal step
+// (14 ~= 10 * sqrt(2)). Same as Sebastian Lague's GetDistance().
+int Board::getDistance(int tileA, int tileB)
 {
-	//initial node where the start position is in
-	int nodeA = getTileN(positionA.x, positionA.y);
-	//target node where the end position is in
-	int nodeB = getTileN(positionA.x, positionA.y);
+	int dstX = abs(tileA % tilesPerRow - tileB % tilesPerRow);
+	int dstY = abs(tileA / tilesPerRow - tileB / tilesPerRow);
+	if (dstX > dstY) {
+		return 14 * dstY + 10 * (dstX - dstY);
+	}
+	return 14 * dstX + 10 * (dstY - dstX);
+}
 
-	float distBtwnAdjTiles = tileL; //10 units for example
-	float distBtwnAdj = distBtwnAdjTiles * sqrtf(2); // ~= to 14 units
+// A* path planning, following Sebastian Lague's
+// "A* Pathfinding (E01: algorithm explanation)": https://www.youtube.com/watch?v=-L-WgKMFuhE
+// Simplest version: OPEN is a plain list searched for the lowest F cost each step.
+// Returns the tile indices from nodeA (start) to nodeB (end), both included,
+// or an empty list if there is no path.
+std::vector<int> Board::pathfinding(int nodeA, int nodeB)
+{
+	std::vector<int> path;
+	searchedTiles.clear();
+	if (nodeA < 0 || nodeA >= tileCount || nodeB < 0 || nodeB >= tileCount) {
+		return path;
+	}
+	if (navDirty) {
+		recalculateNav();
+	}
 
-	//vector of all nodes (tiles)
-	vector<int> totalNodes = std::vector<int>(tileCount); 
+	//per-tile node data
+	//G cost = distance from the start, H cost = estimated distance to the end, F cost = G + H
+	std::vector<int> gCost(tileCount, 0);
+	std::vector<int> hCost(tileCount, 0);
+	std::vector<int> parent(tileCount, -1);   //tile we came from (-1 = none)
+	std::vector<bool> inOpen(tileCount, false);
+	std::vector<bool> inClosed(tileCount, false);
 
 	//OPEN : the set of nodes to be evaluated
-	vector<int> openNodes;
-	//CLOSED : the set of nodes already evaluated
-	vector<int> closedNodes;
-
-	//vector initialization: 
-	/*
-	//openNodes = std::vector<int>(tileCount);
-	//closedNodes = std::vector<int>(tileCount);
-	*/
-	for (int i = 0; i < openNodes.size(); i++) {
-		cout << "open[" << i << "]: " << openNodes[i] << endl; //prints number at index i
-	}
-	for (int i = 0; i < closedNodes.size(); i++) {
-		cout << "closed[" << i << "]: " << closedNodes[i] << endl; //prints number at index i
-	}
+	std::vector<int> openNodes;
+	//CLOSED : the set of nodes already evaluated (tracked with inClosed)
 
 	//add the start node to OPEN:
 	openNodes.push_back(nodeA);
+	inOpen[nodeA] = true;
+	hCost[nodeA] = getDistance(nodeA, nodeB);
 
-	for (int i = 0; i < openNodes.size(); i++) {
-		cout << "open[" << i << "]: " << openNodes[i] << endl; //prints number at index i
+	while (!openNodes.empty()) {
+		//current = the node in OPEN with the lowest F cost (if tied, the lowest H cost)
+		int best = 0;
+		for (int k = 1; k < (int)openNodes.size(); k++) {
+			int candidate = openNodes[k];
+			int current = openNodes[best];
+			int fCandidate = gCost[candidate] + hCost[candidate];
+			int fCurrent = gCost[current] + hCost[current];
+			if (fCandidate < fCurrent || (fCandidate == fCurrent && hCost[candidate] < hCost[current])) {
+				best = k;
+			}
+		}
+		int current = openNodes[best];
+
+		//remove current from OPEN, add it to CLOSED
+		openNodes.erase(openNodes.begin() + best);
+		inOpen[current] = false;
+		inClosed[current] = true;
+		searchedTiles.push_back(current); //shown in purple
+
+		//path has been found: retrace it from the end back to the start
+		if (current == nodeB) {
+			for (int tile = nodeB; tile != -1; tile = parent[tile]) {
+				path.push_back(tile);
+			}
+			std::reverse(path.begin(), path.end());
+			return path;
+		}
+
+		//for each neighbour of the current node (walls are never in the nav graph)
+		vertex v;
+		if (!nav.getVertex(current % tilesPerRow, current / tilesPerRow, v)) {
+			continue;
+		}
+		for (const gridcoord& coord : v.adjacent) {
+			int neighbour = coord.second * tilesPerRow + coord.first;
+
+			//skip it if it has already been evaluated
+			if (inClosed[neighbour]) {
+				continue;
+			}
+
+			//if the new path to the neighbour is shorter, or the neighbour is not in OPEN yet
+			int newCostToNeighbour = gCost[current] + getDistance(current, neighbour);
+			if (newCostToNeighbour < gCost[neighbour] || !inOpen[neighbour]) {
+				gCost[neighbour] = newCostToNeighbour;
+				hCost[neighbour] = getDistance(neighbour, nodeB);
+				parent[neighbour] = current;
+
+				if (!inOpen[neighbour]) {
+					openNodes.push_back(neighbour);
+					inOpen[neighbour] = true;
+				}
+			}
+		}
 	}
-	for (int i = 0; i < closedNodes.size(); i++) {
-		cout << "closed[" << i << "]: " << closedNodes[i] << endl; //prints number at index i
-	}
 
-
-	
-
+	//OPEN ran out without reaching the end: no path exists
+	return path;
 }
 int Board::getTileN(float x, float y) {
 	//Find the index number starting at (0,0) [index 0]going right then down 

@@ -167,7 +167,17 @@ int main()
 		if (GameBoard.navDirty) {
 			//walls/start/end changed (or a map was loaded): rebuild the navigation graph
 			GameBoard.recalculateNav();
-			//A* would go here: GameBoard.pathTiles = <path from startPos to endPos>;
+			//re-plan with A* whenever the map changes; the path lights up blue
+			if (GameBoard.startExists && GameBoard.endExists) {
+				GameBoard.pathTiles = GameBoard.pathfinding(GameBoard.startPos, GameBoard.endPos);
+				if (GameBoard.pathTiles.empty()) {
+					std::cout << "A*: no path from start to end" << std::endl;
+				}
+			}
+			else {
+				GameBoard.pathTiles.clear();
+				GameBoard.searchedTiles.clear();
+			}
 		}
 		GameBoard.drawBoard(window);
 		player.update();

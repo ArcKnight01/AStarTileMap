@@ -9,6 +9,8 @@
 #include <string>
 #include <fstream>
 #include <cmath>
+#include <cstdlib>
+#include <algorithm>
 #include "NavGraph.h"
 using namespace sf;
 using namespace std;
@@ -78,7 +80,10 @@ public:
 	void createEndNode();
 	void exportBoard(string name);
 	void importBoard(string& name);
-	void pathfinding(Vector2f positionA, Vector2f positionB);
+	//A* (Sebastian Lague): tile indices from start to end, empty if there is no path
+	std::vector<int> pathfinding(int nodeA, int nodeB);
+	//A* cost between two tiles: 10 per straight step, 14 per diagonal step
+	int getDistance(int tileA, int tileB);
 	//gets the position of the tile from index number (N)
 	sf::Vector2f getTilePos(int N);
 	//gets the index of the tile from the posiion
@@ -92,9 +97,11 @@ public:
 	void recalculateNav();
 
 	// --- Path display ---
-	// Fill this with tile indices (start -> end) and drawBoard() lights them up
-	// with the blue path sprite. Nothing fills it yet: that's A*'s job.
+	// pathTiles: the A* path (start -> end), drawn with the blue light.
+	// searchedTiles: every tile A* evaluated (its CLOSED set), drawn with the purple light.
+	// pathfinding() fills both; drawBoard() draws purple first, then blue on top.
 	std::vector<int> pathTiles;
+	std::vector<int> searchedTiles;
 
 	sf::Texture wallTexture;
 	sf::Sprite wallSprite;
@@ -115,6 +122,10 @@ public:
 	//Other colours available: Textures/light_{red,orange,yellow,green,blue,purple}.png
 	sf::Texture pathTexture;
 	sf::Sprite pathSprite;
+
+	//purple light used to draw searchedTiles
+	sf::Texture searchedTexture;
+	sf::Sprite searchedSprite;
 
 };
 

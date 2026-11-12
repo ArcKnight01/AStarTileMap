@@ -18,6 +18,13 @@ add_executable(AStarTileMap
 )
 target_link_libraries(AStarTileMap PRIVATE sfml-graphics sfml-window sfml-system)
 
+# A* test: compares pathfinding() with a brute-force search.  Run: ctest --test-dir build
+enable_testing()
+add_executable(test_astar tests/test_astar.cpp src/Tile.cpp)
+target_include_directories(test_astar PRIVATE src)
+target_link_libraries(test_astar PRIVATE sfml-graphics sfml-window sfml-system)
+add_test(NAME astar COMMAND test_astar WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 # The program loads "Textures/*.png" and "maps/<name>.txt" relative to the
 # directory it is run from (the build folder). Link those folders back to the
 # repo so maps you save with E land in the repo's maps/ folder, not a copy.

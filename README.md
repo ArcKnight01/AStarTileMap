@@ -1,8 +1,8 @@
 # AStarTileMap
 
 A 20×20 tile-map editor in C++ with SFML. You draw walls, place a start and an end tile, and drive a small
-character around the map. It is meant to become an **A\* path-planning visualizer**: start in green, goal in red,
-and the planned path lit up in blue.
+character around the map. It is an **A\* path-planning visualizer**: start in green, goal in red, every tile A\* searched
+in purple, and the planned path in blue. The path is re-planned every time you change the map.
 
 This repo merges my two old Visual Studio projects into one CMake project that builds on Linux (and Windows/macOS):
 
@@ -12,7 +12,7 @@ This repo merges my two old Visual Studio projects into one CMake project that b
 | `OriginalTileMap` | Nov 2020 | Nothing extra. It differs from TileMap by only two lines. |
 | iD Tech `C4-Template` / my `newProjectiles` | 2019–20 | `NavGraph` (walkable tiles + their neighbours), now in `src/NavGraph.h` and `Board::recalculateNav()` |
 
-**A\* is not implemented yet.** `Board::pathfinding()` is still the original stub. See [Adding A\*](#adding-a-path-planning).
+A\* is implemented in `Board::pathfinding()` as the simplest version of Sebastian Lague's algorithm. See [A\* path planning](#a-path-planning).
 
 ---
 
@@ -55,6 +55,17 @@ A name that doesn't exist yet gives you a new empty map with a wall border. Pres
 Run it from inside `build/`, as both setups above do. CMake links `build/Textures` and `build/maps` back to this repo, so
 maps you save end up in `maps/`.
 
+### Testing the A\*
+```bash
+cmake --build build && ctest --test-dir build --output-on-failure
+```
+`tests/test_astar.cpp` compares `pathfinding()` with a brute-force shortest-path search (Dijkstra). It runs on 2,000 random maps, a map
+split by a solid wall (no path), the same map with one gap, and `dungeon`. Each case checks four things:
+- A\* finds a path exactly when one exists.
+- The path is as short as possible.
+- Every step is a legal move.
+- Every path tile is also marked as searched, and no wall ever is.
+
 ---
 
 ## Controls
@@ -65,6 +76,7 @@ maps you save end up in `maps/`.
 | **Space** | On the selected tile: ground ↔ wall. A start or end tile turns back into ground. |
 | **Right click** | Select a tile and toggle it at once (like left click + Space) |
 | **Enter** | On the selected ground tile: place the **start** (green), or the **end** (red) if a start already exists. On a start or end tile: remove it. |
+| *(automatic)* | Whenever both a start and an end exist, A\* runs. Tiles it searched light **purple** and the path lights **blue**. Editing any tile re-plans. If there is no path, the purple shows how far it got and the terminal prints `A*: no path from start to end`. |
 | **W A S D** | Move the blue character. It accelerates, slides and collides with walls. |
 | **E** | Save the map to `maps/<name>.txt` and close |
 | **Esc** / close window | Quit **without** saving |
@@ -79,9 +91,11 @@ whether it is ground, wall, start, end or path.
 ```
 src/
   main.cpp        window, input handling and the game loop
-  Tile.h/.cpp     class Board: the grid, drawing, editing, load/save, NavGraph, pathfinding() stub
+  Tile.h/.cpp     class Board: the grid, drawing, editing, load/save, NavGraph, A* (pathfinding)
   NavGraph.h      vertex + NavGraph types (from the iD Tech template)
   character.h/.cpp  class Character: the player you drive with WASD
+tests/
+  test_astar.cpp  checks A* against a brute-force search
 assets/Textures/  tile sprites
 maps/             saved maps
 ```
@@ -90,18 +104,23 @@ maps/             saved maps
 the `Character` on the start tile (or the first empty tile). Each frame it:
 1. Reads input and sets flags on the board (`clickPos`, `spacePressed`, `enterPressed`…) or the character (`moveUp`…).
 2. Calls `Board::convertTile()`, which applies the Space or Enter edit to the selected tile.
-3. If the map changed (`navDirty`), calls `Board::recalculateNav()` to rebuild the navigation graph. This is where A\* should run.
+3. If the map changed (`navDirty`), calls `Board::recalculateNav()` to rebuild the navigation graph. Then, if a start and an end
+   both exist, it runs A\* (`Board::pathfinding(startPos, endPos)`), which fills `pathTiles` and `searchedTiles`.
 4. Draws the board, then updates and draws the character.
 
 **`Board` (Tile.h/.cpp)**
 - `tileTypes`: one `tiletype` per tile (`wall`, `ground`, `startnode`, `endnode`, `checkpoint`). Tile `i` is at column `i % 20`, row `i / 20`.
 - `getTileN(x, y)` converts pixels to a tile index; `getTilePos(i)` converts a tile index to the pixel position of its top-left corner.
-- `drawBoard()` works in three passes: (1) every tile's own sprite, (2) **every tile in `pathTiles` lit blue**, (3) the selection
-  (cyan) and hover (white) highlights, as see-through boxes with inward outlines.
+- `drawBoard()` works in three passes:
+  1. every tile's own sprite;
+  2. the A\* result: **`searchedTiles` lit purple**, then **`pathTiles` lit blue** on top;
+  3. the selection (cyan) and hover (white) highlights, as see-through boxes with inward outlines.
 - `importBoard()` / `exportBoard()` read and write `maps/<name>.txt`.
 - `getTile(x, y)`, `calcNeighbors()`, `recalculateNav()`: the merged **NavGraph**. Every non-wall tile becomes a `vertex` holding
   the coordinates of its walkable neighbours (all 8 directions). Look one up with `nav.getVertex(x, y, v)` and read `v.adjacent`.
-- `pathfinding(a, b)`: the original A\* stub. It only puts the start node in OPEN and prints it.
+- `pathfinding(nodeA, nodeB)`: **A\***. It returns the tile indices from start to end (both included), or an empty list if there is
+  no path. It also records every tile it evaluated (its CLOSED set, in order) in `searchedTiles`. `getDistance(a, b)` is its cost
+  function: 10 per straight step, 14 per diagonal step.
 
 **`Character` (character.h/.cpp)**: Moves by velocity and acceleration with friction, and is clamped to the window.
 `updateNavigation()` checks the 8 tiles around it and stops movement into walls. As it moves, it turns the ground tile under it into a
@@ -122,16 +141,20 @@ Every floor tile has a "light" in the middle:
 | `endTile.png` | red | end |
 | `checkPointTile.png` | yellow | the character's breadcrumb (tile it's standing on) |
 | `emptyTile.png` | dark/black | unused. It would suit "explored" tiles. |
-| `light_red/orange/yellow/green/blue/purple.png` | coloured lights | **`light_blue` = path.** The rest are free for the open set, closed set, a second agent, etc. |
+| `light_blue.png` | blue | **the A\* path** |
+| `light_purple.png` | purple | **tiles A\* searched** (CLOSED set) |
+| `light_red/orange/yellow/green.png` | coloured lights | free, e.g. for the OPEN set or a second agent |
 
 ---
 
-## Adding A\* path planning
+## A\* path planning
 
 ### Evidence of what I originally planned
-- **The stub has been there since day one.** `Board::pathfinding()` is in the very first commit of both repos (OriginalTileMap on 2020‑11‑17,
-  TileMap on 2020‑12‑08). It has `OPEN` / `CLOSED` lists and Lague-style costs: `distBtwnAdjTiles` (10 units straight) and
-  `× sqrt(2)` ("~= 14 units") diagonal. The constructor calls it as a test (`pathfinding(getTilePos(1), getTilePos(9))`).
+- **The stub was there from day one.** `Board::pathfinding()` was in the very first commit of both repos (OriginalTileMap on 2020‑11‑17,
+  TileMap on 2020‑12‑08). It had `OPEN` / `CLOSED` lists and Lague-style costs: `distBtwnAdjTiles` (10 units straight) and
+  `× sqrt(2)` ("~= 14 units") diagonal. The constructor called it as a test (`pathfinding(getTilePos(1), getTilePos(9))`).
+  It never got past adding the start node to OPEN, and its target was computed from the start position by mistake.
+  The current implementation replaces it.
 - **Start/end tiles exist for a reason.** The `startnode` / `endnode` tile types, `startPos` / `endPos`, and the empty
   `createStartNode()` / `createEndNode()` were added so the path has endpoints.
 - **The character was meant to follow the path.** `Character` stores `startPosition` / `endPosition` "get from board", and its
@@ -167,28 +190,23 @@ distance(a, b): dx, dy = |difference| in tiles
                 14*min(dx,dy) + 10*(max(dx,dy) - min(dx,dy))   // diagonal 14, straight 10
 ```
 
-### Suggested steps in this code
-1. **Per-tile node data.** Add arrays to `Board`, each of size `tileCount`: `gCost`, `hCost`, `parent` (tile index, -1 = none), and
-   `inOpen` / `inClosed` flags. F is `gCost + hCost`.
-2. **Neighbours.** Use the merged NavGraph: `nav.getVertex(x, y, v)`, then `v.adjacent`. Convert with `i = y*20 + x` and `x = i % 20`, `y = i / 20`.
-3. **Fix the stub.** Its signature is `pathfinding(Vector2f a, Vector2f b)`, but `nodeB` is computed from `positionA`. It's simpler as
-   `std::vector<int> pathfinding(int startIdx, int endIdx)` returning tile indices.
-4. **Call it in the right place.** Remove the test call from the `Board` constructor (it runs before any map is loaded). In `main.cpp`,
-   inside the `if (GameBoard.navDirty)` block, run it when both ends exist:
-   ```cpp
-   if (GameBoard.startExists && GameBoard.endExists)
-       GameBoard.pathTiles = GameBoard.pathfinding(GameBoard.startPos, GameBoard.endPos);
-   else
-       GameBoard.pathTiles.clear();
-   ```
-   `drawBoard()` already lights `pathTiles` blue, so the path appears as soon as you place the end, and it updates as you edit walls.
-5. **Retrace.** Follow `parent` from the end back to the start, then reverse the list.
-6. **Visualize the search (optional).** Draw OPEN tiles with `light_green`/`light_orange` and CLOSED with `emptyTile` or
-   `light_purple`. To animate it, run one loop iteration per frame instead of the whole search at once.
-7. **Corner cutting.** `calcNeighbors()` allows diagonals even between two walls that touch at a corner. For a robot, skip a diagonal
-   step when either of the two straight tiles beside it is a wall.
-8. **Speed.** For 400 tiles a linear scan of OPEN is fine. Use a `std::priority_queue` (Lague's heap episode) for bigger maps.
-9. **Follow the path.** Steer the `Character` toward the centre of the next path tile instead of reading WASD.
+### How it maps onto this code
+`Board::pathfinding()` in `src/Tile.cpp` follows the pseudocode above line by line, using the names from my original stub:
+- **Node data:** per-tile arrays `gCost`, `hCost`, `parent` (-1 = none), and `inOpen` / `inClosed` flags. F is `gCost + hCost`.
+- **OPEN:** `openNodes`, a plain list. Each step scans it for the lowest F, with ties going to the lowest H. This is Lague's simplest
+  version, and plenty fast for 400 tiles.
+- **Neighbours:** read from the merged NavGraph (`nav.getVertex(x, y, v)`, then `v.adjacent`), so walls are never considered.
+- **Retrace:** follows `parent` from the end back to the start, then reverses the list.
+- **Searched tiles:** each tile moved into CLOSED is also added to `searchedTiles`, which is drawn purple.
+
+### Possible next steps
+1. **Stop corner cutting.** Like Lague's simple version, a diagonal step is allowed even between two walls that touch at a corner
+   (you can see the path squeeze through such gaps in `dungeon`). For a robot, skip a diagonal step in `calcNeighbors()` when
+   either of the two straight tiles beside it is a wall.
+2. **Show the OPEN set too.** Collect `openNodes` when the search ends and draw them with `light_orange`, so the edge of the search shows.
+3. **Animate the search.** Run one loop iteration per frame instead of the whole search at once, so you can watch the purple spread.
+4. **Bigger maps.** Replace the linear scan of OPEN with a `std::priority_queue`, as in Lague's heap episode.
+5. **Follow the path.** Steer the `Character` toward the centre of the next path tile instead of reading WASD.
 
 ---
 
