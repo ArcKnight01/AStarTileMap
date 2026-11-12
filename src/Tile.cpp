@@ -117,16 +117,26 @@ void Board::drawBoard(sf::RenderWindow& window) {
 		window.draw(box);
 	};
 
-	//selected tile (same rule as before for when the selection shows: it hides right after
-	//the tile is converted, until you click again)
-	bool showSelection = hasClicked && !spacePressed && !enterPressed &&
-		((hasBeenConverted == false && (clickPos != lastTileConverted || (lastTileConverted == 0 && (!spaceWasPressed || !enterWasPressed))))
-		|| (clickPos == lastTileConverted && hasBeenConverted && conversionReset));
+	//OLD selection highlight for the Space / Enter controls (replaced by the placement preview below):
+	////selected tile (same rule as before for when the selection shows: it hides right after
+	////the tile is converted, until you click again)
+	//bool showSelection = hasClicked && !spacePressed && !enterPressed &&
+	//	((hasBeenConverted == false && (clickPos != lastTileConverted || (lastTileConverted == 0 && (!spaceWasPressed || !enterWasPressed))))
+	//	|| (clickPos == lastTileConverted && hasBeenConverted && conversionReset));
+	//if (showSelection) {
+	//	drawHighlight(clickPos, sf::Color::Cyan, 45, 5.f);
+	//}
+
+	//selected tile: draw the previewed type on it (what it will become), then the cyan frame
+	bool showSelection = isPlacing && placingTile >= 0 && placingTile < tileCount;
 	if (showSelection) {
-		drawHighlight(clickPos, sf::Color::Cyan, 45, 5.f);
+		sf::Sprite& preview = getSpriteFor(getPlacementPreview());
+		preview.setPosition(getTilePos(placingTile));
+		window.draw(preview);
+		drawHighlight(placingTile, sf::Color::Cyan, 45, 5.f);
 	}
-	//hovered tile (skipped when it is the visible selection, which already has a frame)
-	if (!(showSelection && leftMousePos == clickPos)) {
+	//hovered tile (skipped when it is the selected tile, which already has a frame)
+	if (!(showSelection && leftMousePos == placingTile)) {
 		drawHighlight(leftMousePos, sf::Color::White, 40, 3.f);
 	}
 }

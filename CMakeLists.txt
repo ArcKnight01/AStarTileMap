@@ -15,6 +15,7 @@ add_executable(AStarTileMap
   src/Tile.cpp
   src/character.cpp
   src/Pathfinding.cpp
+  src/TilePlacement.cpp
   src/Button.cpp
   src/TextBox.cpp
   src/Dropdown.cpp
@@ -24,7 +25,7 @@ target_link_libraries(AStarTileMap PRIVATE sfml-graphics sfml-window sfml-system
 
 # A* test: compares pathfinding() with a brute-force search.  Run: ctest --test-dir build
 enable_testing()
-add_executable(test_astar tests/test_astar.cpp src/Tile.cpp src/Pathfinding.cpp)
+add_executable(test_astar tests/test_astar.cpp src/Tile.cpp src/Pathfinding.cpp src/TilePlacement.cpp)
 target_include_directories(test_astar PRIVATE src)
 target_link_libraries(test_astar PRIVATE sfml-graphics sfml-window sfml-system)
 add_test(NAME astar COMMAND test_astar WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

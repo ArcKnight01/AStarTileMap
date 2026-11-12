@@ -92,6 +92,22 @@ public:
 	//"dungeon", "dungeon.txt", "maps/dungeon" and " dungeon " all become "dungeon"; "" becomes "default"
 	static string cleanMapName(string name);
 
+	// --- Placing tiles (TilePlacement.cpp) ---
+	// Click a tile to select it, pick a type with Up / Down (the tile previews it), click it again (or Enter) to place,
+	// right-click or Backspace to unselect. Start and End are only offered while they don't exist yet (or on the tile that
+	// already is the start / end), so there is never more than one of each.
+	bool isPlacing = false;              //a tile is selected and waiting for a type
+	int placingTile = -1;                //the selected tile
+	std::vector<tiletype> placementOptions; //what can be placed on it (ground, wall, and start / end when allowed)
+	int placementChoice = 0;             //index into placementOptions (the one previewed)
+	void beginPlacement(int tile);       //select a tile and build its list of options
+	void movePlacementChoice(int step);  //Up = -1, Down = +1 (wraps around)
+	void confirmPlacement();             //place the previewed type on the selected tile
+	void cancelPlacement();              //unselect without changing anything
+	tiletype getPlacementPreview();      //the type currently previewed
+	static string getTileTypeName(tiletype type);
+	sf::Sprite& getSpriteFor(tiletype type); //the sprite that draws this tile type
+
 	// --- Path planning (Pathfinding.cpp) ---
 	//runs the chosen algorithm: tile indices from start to end, empty if there is no path.
 	//Every algorithm also fills searchedTiles with the tiles it evaluated.

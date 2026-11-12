@@ -177,30 +177,50 @@ int main(int argc, char* argv[])
 			}
 			if (event.type == sf::Event::KeyPressed) {
 				if (event.key.code == sf::Keyboard::Escape) {
-					returnToMenu(false); //back to the menu without saving
+					if (GameBoard->isPlacing) {
+						GameBoard->cancelPlacement(); //first Esc only unselects the tile
+					}
+					else {
+						returnToMenu(false); //back to the menu without saving
+					}
 					continue;
 				}
-				if (event.key.code == sf::Keyboard::Space) {
-					if (GameBoard->newSpace == false) {
-						GameBoard->spacePressed = true;
-						GameBoard->newSpace = true;
-					}
-					if (GameBoard->spaceWasPressed == false) {
-						GameBoard->spaceWasPressed = true;
-					}
-				}
+				//OLD controls: Space toggled the selected tile between ground and wall (see Board::convertTile())
+				//if (event.key.code == sf::Keyboard::Space) {
+				//	if (GameBoard->newSpace == false) {
+				//		GameBoard->spacePressed = true;
+				//		GameBoard->newSpace = true;
+				//	}
+				//	if (GameBoard->spaceWasPressed == false) {
+				//		GameBoard->spaceWasPressed = true;
+				//	}
+				//}
 				if (event.key.code == sf::Keyboard::E) {
 					returnToMenu(true); //same as the SAVE & MENU button
 					continue;
 				}
+				//OLD controls: Enter placed the start, then the end, on the selected tile (see Board::convertTile())
+				//if (event.key.code == sf::Keyboard::Enter) {
+				//	if (GameBoard->newEnter == false) {
+				//		GameBoard->enterPressed = true;
+				//		GameBoard->newEnter = true;
+				//	}
+				//	if (GameBoard->enterWasPressed == false) {
+				//		GameBoard->enterWasPressed = true;
+				//	}
+				//}
+				//NEW controls: Up / Down choose what to place on the selected tile, Enter places it, Backspace unselects
+				if (event.key.code == sf::Keyboard::Up) {
+					GameBoard->movePlacementChoice(-1);
+				}
+				if (event.key.code == sf::Keyboard::Down) {
+					GameBoard->movePlacementChoice(+1);
+				}
 				if (event.key.code == sf::Keyboard::Enter) {
-					if (GameBoard->newEnter == false) {
-						GameBoard->enterPressed = true;
-						GameBoard->newEnter = true;
-					}
-					if (GameBoard->enterWasPressed == false) {
-						GameBoard->enterWasPressed = true;
-					}
+					GameBoard->confirmPlacement();
+				}
+				if (event.key.code == sf::Keyboard::BackSpace) {
+					GameBoard->cancelPlacement();
 				}
 				if (event.key.code == sf::Keyboard::W) {
 					player->moveUp = true;
@@ -216,13 +236,14 @@ int main(int argc, char* argv[])
 				}
 			}
 			if (event.type == sf::Event::KeyReleased) {
-				if (event.key.code == sf::Keyboard::Space) {
-					//GameBoard->spacePressed = false;
-					GameBoard->newSpace = false;
-				}
-				if (event.key.code == sf::Keyboard::Enter) {
-					GameBoard->newEnter = false;
-				}
+				//OLD controls (Space / Enter key release)
+				//if (event.key.code == sf::Keyboard::Space) {
+				//	//GameBoard->spacePressed = false;
+				//	GameBoard->newSpace = false;
+				//}
+				//if (event.key.code == sf::Keyboard::Enter) {
+				//	GameBoard->newEnter = false;
+				//}
 				if (event.key.code == sf::Keyboard::W) {
 					player->moveUp = false;
 				}
@@ -239,41 +260,59 @@ int main(int argc, char* argv[])
 
 			if (event.type == sf::Event::MouseButtonPressed) {
 				if (event.mouseButton.button == sf::Mouse::Left) {
-					//Register a new mouse click for piece selection functions
-					GameBoard->newClick = true;
-					GameBoard->conversionReset = true;
-					if (GameBoard->hasClicked == false) {
-						GameBoard->hasClicked = true;
+					//OLD controls: a left click only selected the tile for Space / Enter
+					////Register a new mouse click for piece selection functions
+					//GameBoard->newClick = true;
+					//GameBoard->conversionReset = true;
+					//if (GameBoard->hasClicked == false) {
+					//	GameBoard->hasClicked = true;
+					//}
+					////Find the tile that was clicked in (-1 if the click was outside the map)
+					//GameBoard->clickPos = GameBoard->getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
+					//// the position of mouse
+
+					//NEW controls: click a tile to select it; click the same tile again to place the previewed type.
+					//Clicking a different tile moves the selection there; clicks outside the map are ignored.
+					int clickedTile = GameBoard->getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
+					if (clickedTile != -1) {
+						if (GameBoard->isPlacing && clickedTile == GameBoard->placingTile) {
+							GameBoard->confirmPlacement();
+						}
+						else {
+							GameBoard->beginPlacement(clickedTile);
+						}
 					}
-					//Find the tile that was clicked in (-1 if the click was outside the map)
-					GameBoard->clickPos = GameBoard->getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
-					// the position of mouse
 				}
 				if (event.mouseButton.button == sf::Mouse::Right) {
-					//Register a new mouse click for piece selection functions
-					GameBoard->newClick = true;
-					GameBoard->conversionReset = true;
-					if (GameBoard->hasClicked == false) {
-						GameBoard->hasClicked = true;
-					}
-					//Find the tile that was clicked in
-					GameBoard->clickPos = GameBoard->getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
-					// the position of mouse
-					if (GameBoard->newSpace == false) {
-						GameBoard->spacePressed = true;
-						GameBoard->newSpace = true;
-					}
-					if (GameBoard->spaceWasPressed == false) {
-						GameBoard->spaceWasPressed = true;
-					}
+					//OLD controls: a right click selected the tile and toggled it between ground and wall at once
+					////Register a new mouse click for piece selection functions
+					//GameBoard->newClick = true;
+					//GameBoard->conversionReset = true;
+					//if (GameBoard->hasClicked == false) {
+					//	GameBoard->hasClicked = true;
+					//}
+					////Find the tile that was clicked in
+					//GameBoard->clickPos = GameBoard->getTileN(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y);
+					//// the position of mouse
+					//if (GameBoard->newSpace == false) {
+					//	GameBoard->spacePressed = true;
+					//	GameBoard->newSpace = true;
+					//}
+					//if (GameBoard->spaceWasPressed == false) {
+					//	GameBoard->spaceWasPressed = true;
+					//}
+
+					//NEW controls: a right click unselects the tile
+					GameBoard->cancelPlacement();
 				}
 			}
-			if (event.type == sf::Event::MouseButtonReleased) {
-				if (event.mouseButton.button == sf::Mouse::Right) {
-					//Register a new mouse click for piece selection functions
-					GameBoard->newSpace = false;
-				}
-			}
+			//OLD controls (right-click release)
+			//if (event.type == sf::Event::MouseButtonReleased) {
+			//	if (event.mouseButton.button == sf::Mouse::Right) {
+			//		//Register a new mouse click for piece selection functions
+			//		GameBoard->newSpace = false;
+			//	}
+			//}
 		}
 
 		/* DEFINE ACTIONS (i.e. MOVEMENT) HERE */
@@ -292,7 +331,8 @@ int main(int argc, char* argv[])
 		}
 
 		// --- PLAYING ---
-		GameBoard->convertTile();
+		//OLD controls: convertTile() applied the Space / Enter edits; tiles are now placed with Board::confirmPlacement()
+		//GameBoard->convertTile();
 		if (GameBoard->navDirty) {
 			//walls/start/end changed (or a map was loaded): rebuild the navigation graph
 			GameBoard->recalculateNav();
@@ -309,11 +349,38 @@ int main(int argc, char* argv[])
 		player->update();
 		player->drawCharacter(window);
 
+		//list of what can be placed, next to the selected tile (the highlighted entry is the one previewed on the tile)
+		if (GameBoard->isPlacing) {
+			const float rowW = 110, rowH = 28;
+			int optionCount = (int)GameBoard->placementOptions.size();
+			Vector2f tilePos = GameBoard->getTilePos(GameBoard->placingTile);
+			float listX = tilePos.x + GameBoard->tileW + 6;
+			if (listX + rowW > boardMargin + boardSize) {
+				listX = tilePos.x - rowW - 6; //no room on the right of the tile: show it on the left
+			}
+			float listY = tilePos.y;
+			if (listY + optionCount * rowH > boardMargin + boardSize) {
+				listY = boardMargin + boardSize - optionCount * rowH; //keep it inside the map at the bottom
+			}
+			for (int i = 0; i < optionCount; i++) {
+				bool chosen = (i == GameBoard->placementChoice);
+				RectangleShape row(Vector2f(rowW, rowH));
+				row.setPosition(listX, listY + i * rowH);
+				row.setFillColor(chosen ? Color(70, 70, 140) : Color(25, 25, 55, 230));
+				row.setOutlineColor(chosen ? Color::Cyan : Color(150, 150, 150));
+				row.setOutlineThickness(chosen ? -2.f : -1.f);
+				window.draw(row);
+				Text optionText((chosen ? "> " : "  ") + Board::getTileTypeName(GameBoard->placementOptions[i]), font, 17);
+				optionText.setPosition(listX + 6, listY + i * rowH + 3);
+				window.draw(optionText);
+			}
+		}
+
 		//side panel: map, algorithm, result, controls, and the SAVE & MENU button
 		std::string info = "Map: " + GameBoard->boardname + (GameBoard->mapIsNew ? " (new)" : "") + "\n";
 		info += "Algorithm: " + getPathAlgorithmName(algorithm) + "\n\n";
 		if (!(GameBoard->startExists && GameBoard->endExists)) {
-			info += "Place a start and an end\n(select a tile, press Enter)\n";
+			info += "Place a start and an end:\nclick a tile, then pick\nStart or End\n";
 		}
 		else if (GameBoard->pathTiles.empty()) {
 			info += "No path!\n";
@@ -330,10 +397,11 @@ int main(int argc, char* argv[])
 		}
 		info += "\nControls:\n";
 		info += "Click: select a tile\n";
-		info += "Space / right-click: wall\n";
-		info += "Enter: start, then end\n";
+		info += "Up / Down: choose type\n";
+		info += "Click again / Enter: place\n";
+		info += "Right-click / Backspace:\n  unselect\n";
 		info += "W A S D: move\n";
-		info += "Esc: menu (no save)\n";
+		info += "Esc: unselect, then menu\n";
 		panelText.setString(info);
 		window.draw(panelText);
 		saveMenuButton.draw(window, mouse);

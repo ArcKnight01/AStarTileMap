@@ -94,18 +94,23 @@ result (path length in tiles, path cost, tiles searched, or "No path!"), a contr
 
 | Input | Effect |
 |---|---|
-| **Left click** | Select a tile (cyan frame + light cyan tint; the tile underneath stays visible) |
-| **Space** | On the selected tile: ground ↔ wall. A start or end tile turns back into ground. |
-| **Right click** | Select a tile and toggle it at once (like left click + Space) |
-| **Enter** | On the selected ground tile: place the **start** (green), or the **end** (red) if a start already exists. On a start or end tile: remove it. |
+| **Left click** a tile | Select it. A list appears beside it: **Ground**, **Wall**, **Start**, **End**. Start and End are only listed while they don't exist yet (or on the tile that already is the start / end), so there's never more than one of each. |
+| **↑ / ↓** | Choose from the list. The tile **previews** the highlighted type under its cyan frame. |
+| **Left click** the same tile again, or **Enter** | Place the previewed type. Choosing Ground on the start or end removes it. |
+| **Left click** another tile | Move the selection there |
+| **Right click**, **Backspace** or **Esc** | Unselect without changing anything (Esc only goes back to the menu when nothing is selected) |
 | *(automatic)* | Whenever both a start and an end exist, the chosen algorithm runs. Tiles it searched light **purple** and the path lights **blue**. Editing any tile re-plans. If there is no path, the purple shows how far it got and the panel says "No path!". |
 | **W A S D** | Move the blue character. It accelerates, slides and collides with walls. |
 | **SAVE & MENU** button, or **E** | Save the map to `maps/<name>.txt` and go back to the menu |
-| **Esc** | Back to the menu **without** saving |
+| **Esc** (nothing selected) | Back to the menu **without** saving |
 | Close window | Quit **without** saving |
 
 Hovering the mouse over a tile gives it a white frame. Both highlights are drawn on top of the tile's own sprite, so you can always see
 whether it is ground, wall, start, end or path.
+
+The previous controls (Space toggled wall/ground, Enter placed the start and then the end, right click toggled a wall) are still in
+the code, **commented out** and marked `OLD controls` in `main.cpp` and `Tile.cpp`. `Board::convertTile()`, which applied them, is
+still there but no longer called.
 
 ---
 
@@ -117,6 +122,7 @@ src/
   Tile.h/.cpp       class Board: the grid, drawing, editing, load/save, NavGraph
   Pathfinding.h     enum PathAlgorithm and the names shown in the menu's dropdown
   Pathfinding.cpp   the four algorithms: A* (pathfinding), Dijkstra's, BFS, DFS, plus findPath() and getDistance()
+  TilePlacement.cpp placing tiles: select a tile, choose its type with Up / Down, confirm or unselect
   NavGraph.h        vertex + NavGraph types (from the iD Tech template)
   character.h/.cpp  class Character: the player you drive with WASD
   Button.h/.cpp     class Button: a clickable rectangle with centred text
@@ -132,12 +138,12 @@ maps/               saved maps
 **`main.cpp`**: Opens a 1100×800 window and starts on the **menu**. Pressing START creates a fresh 20×20 `Board` (720×720 px,
 so each tile is 36 px) at a 40 px margin, loads the map named in the text box, and spawns the `Character` on the start tile (or
 the first empty tile). Each frame on the PLAYING screen it:
-1. Reads input and sets flags on the board (`clickPos`, `spacePressed`, `enterPressed`…) or the character (`moveUp`…).
-2. Calls `Board::convertTile()`, which applies the Space or Enter edit to the selected tile.
-3. If the map changed (`navDirty`), calls `Board::recalculateNav()` to rebuild the navigation graph. Then, if a start and an end
+1. Reads input. Clicks and the arrow keys call the board's placement functions (`beginPlacement`, `movePlacementChoice`,
+   `confirmPlacement`, `cancelPlacement`); W A S D set flags on the character (`moveUp`…).
+2. If the map changed (`navDirty`), calls `Board::recalculateNav()` to rebuild the navigation graph. Then, if a start and an end
    both exist, it runs the chosen algorithm (`Board::findPath(algorithm, startPos, endPos)`), which fills `pathTiles` and
    `searchedTiles`.
-4. Draws the board, the character, and the side panel.
+3. Draws the board, the character, the option list beside a selected tile, and the side panel.
 
 **`Board` (Tile.h/.cpp)**
 - `tileTypes`: one `tiletype` per tile (`wall`, `ground`, `startnode`, `endnode`, `checkpoint`). Tile `i` is at column `i % 20`, row `i / 20`.
@@ -146,7 +152,12 @@ the first empty tile). Each frame on the PLAYING screen it:
 - `drawBoard()` draws an outline around the map, then works in three passes:
   1. every tile's own sprite;
   2. the search result: **`searchedTiles` lit purple**, then **`pathTiles` lit blue** on top;
-  3. the selection (cyan) and hover (white) highlights, as see-through boxes with inward outlines.
+  3. the selected tile, drawn as the type being previewed, with a cyan frame; then the hover highlight (white).
+- **Placing tiles** (`TilePlacement.cpp`): `beginPlacement(tile)` selects a tile and builds `placementOptions` (ground, wall, plus
+  start / end when allowed). `movePlacementChoice(±1)` moves `placementChoice`, and `confirmPlacement()` writes it to `tileTypes`,
+  updating `startPos` / `endPos` / `startExists` / `endExists` and setting `navDirty` so the path re-plans. `cancelPlacement()`
+  unselects. To add a new tile type, add it to `enum tiletype`, `getTileTypeName()`, `getSpriteFor()` and the list in
+  `beginPlacement()`.
 - `importBoard()` / `exportBoard()` read and write `maps/<name>.txt`. `cleanMapName()` tidies a typed name, and
   `getSavedMapNames()` lists `maps/`; the menu uses it, and it could later fill a dropdown of saved maps.
 - `getTile(x, y)`, `calcNeighbors()`, `recalculateNav()`: the merged **NavGraph**. Every non-wall tile becomes a `vertex` holding

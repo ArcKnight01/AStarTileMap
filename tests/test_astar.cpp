@@ -103,6 +103,46 @@ int main() {
 		CHECK(placed.getTileN(41, 41) == 0 && placed.getTileN(40 + 720 - 1, 40 + 720 - 1) == 399, "margin: corners map to tiles 0 and 399");
 		CHECK(placed.getTileN(10, 10) == -1 && placed.getTileN(900, 300) == -1, "margin: points outside the board give -1");
 	}
+	// tile placement: start / end are offered only while missing (or on that very tile), Up / Down wrap, placing updates them
+	{
+		Board p(window, 720, 720, 20, 20);
+		auto offers = [&](tiletype type) {
+			return std::find(p.placementOptions.begin(), p.placementOptions.end(), type) != p.placementOptions.end();
+		};
+		auto choose = [&](tiletype type) { // move the preview to `type` with Down presses
+			for (int i = 0; i < 10 && p.getPlacementPreview() != type; i++) p.movePlacementChoice(+1);
+		};
+		p.beginPlacement(45);
+		CHECK(p.isPlacing && p.placementOptions.size() == 4, "placement: an empty board offers ground, wall, start and end");
+		CHECK(p.getPlacementPreview() == ground, "placement: the preview starts on the tile's current type");
+		p.movePlacementChoice(-1);
+		CHECK(p.getPlacementPreview() == endnode, "placement: Up from the first option wraps to the last");
+		p.cancelPlacement();
+		CHECK(!p.isPlacing && p.tileTypes[45] == ground, "placement: unselecting changes nothing");
+
+		p.beginPlacement(45); choose(startnode); p.confirmPlacement();
+		CHECK(p.tileTypes[45] == startnode && p.startExists && p.startPos == 45 && !p.isPlacing && p.navDirty,
+			"placement: placing a start sets startPos, re-plans and unselects");
+		p.beginPlacement(60);
+		CHECK(!offers(startnode) && offers(endnode) && p.placementOptions.size() == 3, "placement: Start is not offered once it exists");
+		choose(endnode); p.confirmPlacement();
+		CHECK(p.endExists && p.endPos == 60, "placement: placing an end");
+		p.beginPlacement(61);
+		CHECK(!offers(startnode) && !offers(endnode), "placement: neither is offered once both exist");
+		p.cancelPlacement();
+
+		p.beginPlacement(45);
+		CHECK(offers(startnode) && p.getPlacementPreview() == startnode, "placement: the start tile keeps Start in its list");
+		choose(ground); p.confirmPlacement();
+		CHECK(p.tileTypes[45] == ground && !p.startExists, "placement: choosing Ground on the start removes it");
+		p.beginPlacement(61);
+		CHECK(offers(startnode), "placement: Start is offered again after it was removed");
+		choose(wall); p.confirmPlacement();
+		CHECK(p.tileTypes[61] == wall, "placement: placing a wall");
+		p.beginPlacement(-1);
+		CHECK(!p.isPlacing, "placement: selecting outside the board unselects");
+	}
+
 	// map names typed in the menu
 	CHECK(Board::cleanMapName("") == "default" && Board::cleanMapName(" maps/dungeon.txt ") == "dungeon", "map names are cleaned");
 
