@@ -14,11 +14,33 @@
 // The planner only reads the "cost" layer, so a map can also start here (a cost layer made directly) and skip
 // the elevation -> features -> traversability stages.
 
-//"cost" from "traversability"
+/**
+ * Write "cost" from "traversability".
+ *
+ * @param map         Map with a "traversability" layer; gets a "cost" layer (lethal, 1 - t, or by unknownPolicy).
+ * @param parameters  traversabilityThreshold, lethalCost, unknownPolicy and unknownCost.
+ */
 void buildCostMap(GridMap& map, const CostMapParameters& parameters);
-//grows the lethal cells of "cost" by inflationRadius
+/**
+ * Grows the lethal cells of "cost" by inflationRadius.
+ *
+ * @param map         Map whose "cost" layer is inflated in place.
+ * @param parameters  inflationRadius (metres) and lethalCost.
+ */
 void inflateCostMap(GridMap& map, const CostMapParameters& parameters);
-//the whole pipeline from "elevation": features -> traversability -> cost -> inflation
+/**
+ * The whole pipeline from "elevation": features -> traversability -> cost -> inflation.
+ *
+ * @param map         Map with an "elevation" layer (metres); gets every derived layer.
+ * @param parameters  Thresholds, weights and radii of the pipeline.
+ */
 void runCostMapPipeline(GridMap& map, const CostMapParameters& parameters);
 
+/**
+ * Check whether a cost is lethal (at or above lethalCost; NaN counts as lethal).
+ *
+ * @param cost        Value of a cell in the "cost" layer.
+ * @param parameters  lethalCost.
+ * @return            True if the cell must not be entered.
+ */
 bool isLethal(float cost, const CostMapParameters& parameters);

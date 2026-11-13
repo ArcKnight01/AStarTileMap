@@ -22,11 +22,26 @@ class NavGraph
 	std::map<gridcoord, vertex> vertices;
 
 public:
+	/**
+	 * Add the vertex of a walkable tile.
+	 *
+	 * @param x  Column of the tile.
+	 * @param y  Row of the tile.
+	 * @param v  The vertex: its coordinates and walkable neighbours.
+	 */
 	void addVertex(unsigned int x, unsigned int y, vertex v) {
 		vertices.insert(std::make_pair(std::make_pair(x, y), v));
 	}
 
 	// Returns false if (x, y) is not walkable (wall / off the map).
+	/**
+	 * Look up the vertex of a tile.
+	 *
+	 * @param x     Column of the tile.
+	 * @param y     Row of the tile.
+	 * @param vert  Filled with the vertex if it exists.
+	 * @return      False if (x, y) is not walkable.
+	 */
 	bool getVertex(int x, int y, vertex& vert) const {
 		auto found = vertices.find(std::make_pair(x, y));
 		if (found != vertices.end()) {
@@ -36,6 +51,14 @@ public:
 		return false;
 	}
 
+	/**
+	 * Remove every vertex.
+	 */
 	void clear() { vertices.clear(); }
+	/**
+	 * Get the number of vertices.
+	 *
+	 * @return  Number of walkable tiles.
+	 */
 	size_t size() const { return vertices.size(); }
 };

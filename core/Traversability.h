@@ -9,7 +9,19 @@
 // With zeroIfAnyCritical, any feature at or above its critical value makes t = 0 (a stricter variant).
 // t is unknown (NaN) if any feature is unknown.
 // This geometric score is the project's proxy for loose-terrain (sand) risk.
+/**
+ * Write the "traversability" layer (0 = not traversable, 1 = ideal) of the map.
+ *
+ * @param map         Map with "slope", "roughness" and "step" layers.
+ * @param parameters  Critical values, weights and zeroIfAnyCritical.
+ */
 void computeTraversability(GridMap& map, const CostMapParameters& parameters);
 
-//one feature's score: 1 - value / critical below the critical value, 0 at or above it
+/**
+ * One feature's score: 1 - value / critical below the critical value, 0 at or above it.
+ *
+ * @param value     Feature value (radians or metres).
+ * @param critical  Critical value, in the same units.
+ * @return          Score in [0, 1].
+ */
 double getFeatureScore(double value, double critical);

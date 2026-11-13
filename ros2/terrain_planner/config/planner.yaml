@@ -1,0 +1,15 @@
+planner_node:
+  ros__parameters:
+    algorithm: astar              # astar | dijkstra | bfs | dfs
+    replan_rate: 2.0              # Hz, at most
+    robot_frame: base_link        # paths are published in the cost map's frame
+    goal_tolerance: 0.2           # m
+    start_search_radius: 0.5      # m: how far to look for a walkable start if the robot's cell is lethal
+    waypoint_spacing: 0.4         # m
+    nominal_speed: 0.5            # m/s on a cost-0 cell
+    cost_slowdown: 1.0            # speed = nominal_speed / (1 + cost_slowdown * cost)
+    publish_searched_cells: true
+
+cost_map_node:
+  ros__parameters:
+    elevation_layer: elevation

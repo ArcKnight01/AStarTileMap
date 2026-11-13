@@ -3,7 +3,7 @@
 #include <cmath>
 #include "CostMap.h"
 
-// Editing the "elevation" layer with a square Gaussian brush (the "Set terrain" left-click mode), then rebuilding the cost map
+// Editing the "elevation" layer with a tapered Gaussian brush (adds / digs, or flattens at height 0) (the "Set terrain" left-click mode), then rebuilding the cost map
 // around the edit. See TerrainBrush.h for the choices offered in the side panel.
 
 void Board::buildBrushKernels() {
@@ -18,17 +18,18 @@ void Board::buildBrushKernels() {
 	}
 }
 
-void Board::setTerrainHeight(int tile, float elevation, int brushWidth, float strength) {
+void Board::setTerrainHeight(int tile, float elevation, int brushWidth) {
 
 
 	// pseudo-code:
-	// (c0, r0) = cell of tile;  k = ( brushWidth - 1 ) / 2;  K = brushKernels[ brushWidth ]
-	// for every cell (c, r) with |c - c0| <= k and |r - r0| <= k inside the map:
-	//     w = K[ r - r0 + k ][ c - c0 + k ]
-	//     elevation(c, r) = elevation(c, r) + strength * w * ( elevation - elevation(c, r) );  remember (c, r) as edited
+	// (c0, r0) = cell of tile;  k = ( brushWidth - 1 ) / 2;  K = brushKernels[ brushWidth ]   (tapered, TerrainBrush.h)
+	// for every cell (c, r) with |c - c0| <= k and |r - r0| <= k inside the map, and w = K[ r - r0 + k ][ c - c0 + k ] > 0:
+	//     z = elevation(c, r)  (0 if unknown)
+	//     elevation == 0:  elevation(c, r) = z * ( 1 - w )      flatten toward 0 m
+	//     otherwise:       elevation(c, r) = z + elevation * w  add the mound / dig the hollow
+	//     remember (c, r) as edited
 	//
-	// (was: elevation(c, r) = elevation for every cell of the square, which left a vertical step around the patch;
-	//  then z + w * ( elevation - z ), a full step every click)
+	// (was: elevation(c, r) = z + strength * w * ( elevation - z ), moving toward the height instead of adding it)
 
 
 	if (!map.hasLayer("elevation")) {
@@ -39,19 +40,22 @@ void Board::setTerrainHeight(int tile, float elevation, int brushWidth, float st
 	int centerColumn = map.getColumn(tile);
 	int centerRow    = map.getRow(tile);
 	int halfWidth    = (brushWidth - 1) / 2;
+	bool flatten     = std::fabs(elevation) < brushFlattenTolerance;
 
 
 	for (int row = centerRow - halfWidth; row <= centerRow + halfWidth; row++) {
 		for (int column = centerColumn - halfWidth; column <= centerColumn + halfWidth; column++) {
 			if (!map.isInside(column, row)) continue;
-			int index    = map.getIndex(column, row);
 			float weight = kernel[(row - centerRow + halfWidth) * brushWidth + (column - centerColumn + halfWidth)];
-			//an unknown (NaN) height has nothing to blend from, so it is set to the target
-			float current = GridMap::isUnknown(heights[index]) ? elevation : heights[index];
-			heights[index] = current + strength * weight * (elevation - current);
+			if (weight <= 0.f) continue; //the box's corners: the taper is already 0 there
+			int index = map.getIndex(column, row);
+			//an unknown (NaN) height counts as ground level
+			float current  = GridMap::isUnknown(heights[index]) ? 0.f : heights[index];
+			heights[index] = flatten ? current * (1.f - weight) : current + elevation * weight;
 			terrainEditedTiles.push_back(index);
 		}
 	}
+	hasUnsavedChanges = true;
 }
 
 void Board::updateCostMap() {

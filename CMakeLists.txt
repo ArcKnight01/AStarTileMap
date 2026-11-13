@@ -17,6 +17,8 @@ add_library(costmap_core STATIC
   core/Traversability.cpp
   core/CostMap.cpp
   core/PathPlanner.cpp
+  core/RosExport.cpp
+  core/Waypoints.cpp
 )
 target_include_directories(costmap_core PUBLIC core)
 
@@ -30,6 +32,10 @@ add_executable(AStarTileMap
   src/Button.cpp
   src/TextBox.cpp
   src/Dropdown.cpp
+  src/Toggle.cpp
+  src/Dialog.cpp
+  src/ExportPanel.cpp
+  src/ControlsList.cpp
   # src/character.cpp   (CHARACTER: a relic of TileMap, not used on the costmap branch)
 )
 target_link_libraries(AStarTileMap PRIVATE costmap_core sfml-graphics sfml-window sfml-system)
@@ -50,3 +56,6 @@ add_test(NAME costmap COMMAND test_costmap WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets/Textures ${CMAKE_BINARY_DIR}/Textures SYMBOLIC COPY_ON_ERROR)
 file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets/Font     ${CMAKE_BINARY_DIR}/Font     SYMBOLIC COPY_ON_ERROR)
 file(CREATE_LINK ${CMAKE_SOURCE_DIR}/maps            ${CMAKE_BINARY_DIR}/maps     SYMBOLIC COPY_ON_ERROR)
+# EXPORT writes ROS 2 message files to exports/ (git-ignored); made here so the link has something to point at
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/exports)
+file(CREATE_LINK ${CMAKE_SOURCE_DIR}/exports         ${CMAKE_BINARY_DIR}/exports  SYMBOLIC COPY_ON_ERROR)

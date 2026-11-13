@@ -1,0 +1,61 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 20
+    - Class: rviz_default_plugins/Map
+      Name: Cost map
+      Enabled: true
+      Topic:
+        Value: /cost_map_grid
+        Durability Policy: Transient Local
+      Color Scheme: costmap
+      Alpha: 0.8
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Searched cells
+      Enabled: true
+      Topic:
+        Value: /searched_cells
+    - Class: rviz_default_plugins/Path
+      Name: Planned path
+      Enabled: true
+      Topic:
+        Value: /planned_path
+      Color: 50; 120; 255
+      Line Width: 0.03
+    - Class: rviz_default_plugins/Path
+      Name: Waypoints
+      Enabled: true
+      Topic:
+        Value: /waypoints
+      Color: 0; 255; 255
+      Pose Style: Arrows
+      Shaft Length: 0.2
+      Head Length: 0.08
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+  Global Options:
+    Fixed Frame: map
+    Background Color: 15; 15; 35
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Current View
+      Scale: 80
+      X: 0
+      Y: 0
+Window Geometry:
+  Width: 1200
+  Height: 900

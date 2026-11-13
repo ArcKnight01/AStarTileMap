@@ -20,7 +20,7 @@ bool Button::contains(sf::Vector2f point) const {
 	return box.getGlobalBounds().contains(point);
 }
 
-void Button::draw(sf::RenderWindow& window, sf::Vector2f mouse) {
+void Button::draw(sf::RenderTarget& window, sf::Vector2f mouse) {
 	box.setFillColor(contains(mouse) ? sf::Color(70, 70, 140) : sf::Color(35, 35, 80)); //lighter when hovered
 	window.draw(box);
 	window.draw(label);

@@ -16,7 +16,12 @@ struct YamlLine {
 	std::string text;
 };
 
-//the lines of a YAML file with comments and blank lines removed
+/**
+ * The lines of a YAML file with comments and blank lines removed.
+ *
+ * @param file  Open file to read.
+ * @return      The lines, each with its indentation and text.
+ */
 static std::vector<YamlLine> readYamlLines(std::ifstream& file) {
 	std::vector<YamlLine> lines;
 	std::string line;
@@ -32,7 +37,14 @@ static std::vector<YamlLine> readYamlLines(std::ifstream& file) {
 	return lines;
 }
 
-//index of the next line at or after position whose text is "key: ..." (or "- key: ..." inside a sequence), -1 if none
+/**
+ * Index of the next line at or after position whose text is "key: ..." (or "- key: ..." inside a sequence), -1 if none.
+ *
+ * @param lines     Lines of the file, from readYamlLines.
+ * @param position  First line to search (negative counts as 0).
+ * @param key       Key to look for.
+ * @return          Index of the line, or -1.
+ */
 static int findYamlKey(const std::vector<YamlLine>& lines, int position, const std::string& key) {
 	for (int i = std::max(0, position); i < (int)lines.size(); i++) {
 		std::string text = lines[i].text;
@@ -42,7 +54,12 @@ static int findYamlKey(const std::vector<YamlLine>& lines, int position, const s
 	return -1;
 }
 
-//the value after "key:" on a line, without surrounding spaces or quotes
+/**
+ * The value after "key:" on a line, without surrounding spaces or quotes.
+ *
+ * @param line  A "key: value" line.
+ * @return      The value, or an empty string if there is none.
+ */
 static std::string getYamlValue(const YamlLine& line) {
 	std::string value = line.text.substr(line.text.find(':') + 1);
 	std::size_t first = value.find_first_not_of(' ');
@@ -55,6 +72,14 @@ static std::string getYamlValue(const YamlLine& line) {
 
 //the items of the sequence whose key is on line keyLine: a flow sequence "[a, b, ...]" (it may go on over several
 //lines), or a block sequence of "- item" lines under it. position is moved past the sequence.
+/**
+ * Read the items of a YAML sequence in flow or block style.
+ *
+ * @param lines     Lines of the file, from readYamlLines.
+ * @param keyLine   Line that holds the sequence's key.
+ * @param position  Set to the first line after the sequence.
+ * @return          The items, as text.
+ */
 static std::vector<std::string> readYamlSequence(const std::vector<YamlLine>& lines, int keyLine, int& position) {
 	std::vector<std::string> items;
 	std::string flow = getYamlValue(lines[keyLine]);
@@ -84,7 +109,12 @@ static std::vector<std::string> readYamlSequence(const std::vector<YamlLine>& li
 	return items;
 }
 
-//a YAML float: ".nan" / "nan" -> NaN, ".inf" / "-.inf" -> infinity, otherwise the number
+/**
+ * A YAML float: ".nan" / "nan" -> NaN, ".inf" / "-.inf" -> infinity, otherwise the number.
+ *
+ * @param text  The value's text.
+ * @return      The value.
+ */
 static float getYamlFloat(const std::string& text) {
 	std::string lower = text;
 	for (char& character : lower) character = (char)tolower((unsigned char)character);
@@ -96,8 +126,14 @@ static float getYamlFloat(const std::string& text) {
 
 //a float as YAML reads it back as a float: the shortest text that gives back the same value, always with a "." (YAML
 //reads "1e-05" and "7" as a string and an integer, which a float32[] field refuses), NaN as .nan
+/**
+ * Format a number as YAML float text.
+ *
+ * @param value  The number (float or double).
+ * @return       Shortest round-trip text with a ".", or ".nan" / ".inf" / "-.inf".
+ */
 template <typename Number>
-static std::string getYamlNumberText(Number value) {
+std::string getYamlNumberText(Number value) {
 	if (std::isnan(value)) return ".nan";
 	if (std::isinf(value)) return value > 0 ? ".inf" : "-.inf";
 	char buffer[64];
@@ -109,6 +145,10 @@ static std::string getYamlNumberText(Number value) {
 	}
 	return text;
 }
+//the two types it is used with (declared in GridMapFile.h, so core/RosExport.cpp writes numbers the same way)
+//(was static, private to this file)
+template std::string getYamlNumberText<float>(float value);
+template std::string getYamlNumberText<double>(double value);
 
 int getMessageIndex(const GridMap& map, int column, int row) {
 
@@ -141,21 +181,35 @@ bool saveGridMapMessage(const std::string& filename, const GridMap& map, const s
 
 
 	// pseudo-code:
-	// header: stamp 0, frame_id
-	// info:   resolution, length_x = columns * resolution, length_y = rows * resolution, pose = identity at (0, 0, 0)
-	// layers: names;  basic_layers: []
-	// data:   per layer, layout { column_index: rows, stride rows * columns ; row_index: columns, stride columns }
-	//         and values data[ j * columns + i ] = layer( column = columns - 1 - i, row = j )
-	// outer_start_index = inner_start_index = 0
+	// write every layer of the map to the file (writeGridMapMessage)
 
 
 	std::ofstream file(filename);
 	if (!file.is_open()) {
 		return false;
 	}
+	writeGridMapMessage(file, map, map.getLayerNames(), frameId);
+
+
+	return true;
+}
+
+void writeGridMapMessage(std::ostream& file, const GridMap& map, const std::vector<std::string>& names, const std::string& frameId) {
+
+
+	// pseudo-code:
+	// header: stamp 0, frame_id
+	// info:   resolution, length_x = columns * resolution, length_y = rows * resolution, pose = identity at (0, 0, 0)
+	// layers: names;  basic_layers: []
+	// data:   per layer, layout { column_index: rows, stride rows * columns ; row_index: columns, stride columns }
+	//         and values data[ j * columns + i ] = layer( column = columns - 1 - i, row = j )
+	// outer_start_index = inner_start_index = 0
+	//
+	// (the body of saveGridMapMessage until it was split, so an export can write some of the layers to any stream)
+
+
 	int columns = map.getColumns();
 	int rows    = map.getRows();
-	std::vector<std::string> names = map.getLayerNames();
 
 
 	file << "# grid_map_msgs/msg/GridMap (ROS 2 Jazzy), " << columns << " x " << rows << " cells\n";
@@ -210,9 +264,6 @@ bool saveGridMapMessage(const std::string& filename, const GridMap& map, const s
 	}
 	file << "outer_start_index: 0\n";
 	file << "inner_start_index: 0\n";
-
-
-	return true;
 }
 
 bool loadGridMapMessage(const std::string& filename, GridMap& map) {

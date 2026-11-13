@@ -90,8 +90,9 @@ the 10 px wall sprite draws 1:1 and the floor sprites at exactly half size. An e
 | **dungeon** | your old `maps/dungeon.txt` (20 × 20) scaled ×3.6 (each cell takes the old tile it falls in). **The cost layer is written directly**: walls lethal, floor 0. Elevation (walls 0.5 m) is for display only. | a map that starts at the cost layer; flat and lethal only |
 | **hybrid** | a dungeon zone (two 0.5 m walls, a zig-zag corridor), then a rocky 0.8 m ridge across the whole map with **three rugged passes**, flat ground below; through the full pipeline | every route must cross rugged terrain (checked). The passes are three options: left roughest (mean cost 0.26), middle 0.19, right smoothest (0.10) but farthest. A* takes the middle one. |
 
-The menu lists every `.gridmap` file in `maps/`. A name that doesn't exist starts a new flat map, and **SAVE & MENU** saves to
-`maps/<name>.gridmap`. (The old 20 × 20 `.txt` maps are still in `maps/` for the main branch; this branch doesn't list them.)
+The menu lists every `.gridmap` file in `maps/`. A name that doesn't exist starts a new flat map, and **SAVE** saves to
+`maps/<name>.gridmap`. The four example maps are **protected**: SAVE on one of them asks for a name and saves a copy, so
+only `generate_maps` changes them (the tests read them). (The old 20 × 20 `.txt` maps are still in `maps/` for the main branch; this branch doesn't list them.)
 
 ### File format: `grid_map_msgs/msg/GridMap` (ROS 2 Jazzy) in YAML
 Each map is two files in `maps/`:
@@ -129,13 +130,16 @@ feature at the right world position. (The first format was a plain text `gridmap
 
 **MENU:** the map name (text box), the algorithm (dropdown: A*, Dijkstra's, BFS, DFS), the **size of a new map** (cells per
 side, 5–180, at 0.1 m per cell), **START** and **EXIT** (or Esc). The size is only used when the name is a new map; a saved map keeps its own size.
+START both loads and creates: type a saved map's name to open it, or a new name to start one. *(TODO: this relies on
+remembering map names; it could become a **Load** dropdown of the saved maps plus a **New map** button.)*
 The default is **36** (3.6 m): it fits a 1080p screen at 20 px cells, so the 20 × 20 sprites are drawn 1:1.
 
 **The window resizes to the map.** Each cell gets the biggest of 40, 20, 10 or 5 px that fits on your screen, so the sprites
 are always at a clean scale (×2, ×1, ×½, ×¼); only a map too big even for 5 px cells is squeezed to fit. A map smaller than
 the side panel is centred vertically. The window goes back to the menu's size on the way out.
 
-**PLAYING:** the map with a 40 px margin (the window sized to it), and the side panel: map, size, the **algorithm**, **view**
+**PLAYING:** the map with a 40 px margin (the window sized to it), the **colour-scale legend** of the current view (a
+vertical bar between the map and the panel), and the side panel: map, size, the **algorithm**, **view**, **colours**
 and **left click** dropdowns (plus **height** and **brush** with *Set terrain*), path length (cells and metres), path cost,
 cells searched, and the controls.
 
@@ -143,28 +147,70 @@ cells searched, and the controls.
 |---|---|
 | **Algorithm** dropdown | Change the algorithm (A*, Dijkstra's, BFS, DFS); the path re-plans at once. The menu's choice is where it starts. |
 | **Left click** dropdown | **Place start / end** (the rows below) or **Set terrain** |
-| *Set terrain:* **left click** or **drag** | The cells under the brush (outlined in cyan) move part of the way toward the brush **height**: `z ← z + strength · w · (height − z)`, with a Gaussian weight `w` (1 at the centre, ~0.14 at the edge), so a patch is a smooth mound or hollow and clicking again keeps closing the gap (Ground at 30 % flattens a mound a step at a time); the slope, roughness, step, traversability and cost are rebuilt around it and the path re-plans. **Height** presets: hollow −0.05 m, dip −0.02 m, ground 0, bump +0.02 m, mound +0.05 m (walkable with every brush), wall +0.50 m (lethal). **Brush**: 1, 3 × 3, 5 × 5 or 9 × 9 cells; a wider brush is a gentler slope, so it can go higher before it turns lethal (about 0.05 m for 3 × 3, 0.10 m for 9 × 9). Saved with the map. |
-| *Set terrain:* **↑ / ↓** | Raise / lower the brush height by 1 cm (**Shift**: 5 cm); about 0.1 of cost per cm. The panel shows the height. |
-| *Set terrain:* **← / →** | Brush **strength**, 10 % to 100 % (default 30 %): how far one click goes toward the height. 100 % reaches it in one click. |
+| *Set terrain:* **left click** or **drag** | Adds a **tapered Gaussian** of the brush **height** to the elevation inside the brush box (outlined in cyan): `z ← z + height · w`, where `w` is 1 at the box's centre and falls to exactly 0 at its border, so nothing outside the box changes (a 1-cell brush changes only that cell). A negative height digs a hollow; clicks add up. With a height of **0** it **flattens** the box toward 0 m instead: `z ← z · (1 − w)`. It applies once per click and once each time a drag enters another cell. Only elevation is edited: the slope, roughness, step, traversability and cost are rebuilt from it (they reach a couple of cells past the box, and inflation spreads a lethal patch further) and the path re-plans. **Height** presets: −0.05, −0.02, 0 (flatten), +0.02, +0.05 m (walkable with every brush), +0.50 m (lethal). **Brush**: 1, 3 × 3, 5 × 5 or 9 × 9 cells; a wider brush is a gentler slope, so it can go higher before it turns lethal (`test_costmap` prints the measured table). Saved with the map. |
+| *Set terrain:* **↑ / ↓** | Raise / lower the brush height by 1 cm (**Shift**: 5 cm). The panel shows the height. |
 | *Place start / end:* **left click** a cell | Select it. A list appears beside it: **Start** / **End** on any walkable cell (shown as **Move start** / **Move end** when they already exist), or **Clear** on the start or end cell. Lethal cells can't be selected. |
 | *Place start / end:* **↑ / ↓** | Choose; the cell previews it |
 | **Left click** the same cell again, or **Enter** | Place it, and the path re-plans |
-| **Right click**, **Backspace** or **Esc** | Unselect (Esc goes back to the menu when nothing is selected) |
+| **Right click**, **Backspace** or **Esc** | Unselect (Esc goes back to the menu when nothing is selected, like MENU) |
+| **S**, or the **Searched** toggle | Show / hide the purple searched cells. Off, the planner still searches and the panel still counts them; they just don't light up. |
+| **W**, or the **Waypoints** toggle | Draw the path as its **waypoints** (yellow lights on the cells they fall in) instead of every cell (blue). With Searched off too, only the waypoints and the start / end show. |
 | **V**, or the view dropdown | Change the view: **Terrain**, **Elevation**, **Cost**, **Traversability**, **Slope**, **Roughness**, **Step** |
-| **SAVE & MENU** button, or **E** | Save to `maps/<name>.gridmap` and go back to the menu |
+| **Colours** dropdown | The data views' colour map: **red-yellow-green** (ColorBrewer's RdYlGn, reversed), **viridis**, or **grayscale** |
+| **SAVE** button, or **Ctrl+S** | Save to `maps/<name>.gridmap` (and its endpoints file) and keep editing. On an example map it asks for a name and saves a copy instead (a name that exists needs a second Save copy to overwrite). |
+| **MENU** button, or **Esc** | Back to the menu. With unsaved edits (the panel shows **`*`** after the map's name) it first asks *Save changes?* **Save** / **Don't save** / **Cancel** (Enter = Save, Esc = Cancel). Closing the window asks the same. |
+| **EXPORT** button | Export the map and the plan as ROS 2 messages (below): **Save file** writes `exports/<map>_<topic>.yaml`, **Copy** puts it on the clipboard. |
 
-**The views.** Every cell is drawn with your sprites at cell size, as on `main`: lethal cells are the stone wall, or a dark **pit** (`pit.png`) when their lethal area lies below the walkable ground around it, every other
-cell is the floor sprite with its lights. Only the floor's **brown** changes with the view; the lights stay as indicators
-(green start, red end, blue path, purple searched). At load time each sprite is split into the floor's brown (kept as
-brightness, so it can be recoloured per cell) and its lights (the pixels that differ from `floorTile.png`).
-- **Terrain:** the floor's own brown on smooth ground (cost 0); rougher, costlier ground turns it **darker**, then slowly
-  **grey** like the wall (cost 0.5).
-- **Elevation:** green (lowest point of the map) → red (highest).
-- **Cost:** green (0) → yellow → red (0.5).
-- **Traversability:** green (1) → red (0).
-- **Slope / Roughness / Step:** green (0) → red (the critical value).
+**The side panel** lists the controls with small sprites (`assets/Textures/controls`, drawn by
+`tools/make_control_sprites.py`): a mouse with the left or right button lit, arrow keys, and blank keycaps with the key
+written on them (V, S, Esc, Ctrl, Shift, Enter, Back). SAVE, EXPORT and MENU are stacked at the bottom, 12 px apart.
 
-Unknown cells have a black floor.
+**Waypoints.** Each plan is also turned into the waypoints a controller would follow (`core/Waypoints.h`, shared with
+`ros2/terrain_planner`): pruned to straight stretches (Rajput's thesis Algorithm 3, plus a rule that a straight line may
+cost no more than the cells it replaces), then every corner plus equal pieces of at most 0.4 m, each with a heading and a
+planned arrival time (0.5 m/s, slower on costly ground). The panel shows how many and how long; ROS2_PLAN.md §6 has the
+details; `ROS1_REFERENCE_NOTES.md` describes how the ROS 1 (Noetic) projects did it end to end, Rohit Rajput's M4 and
+husky-stable_ws (Frank Laubach and Aidan), for comparison: this project targets ROS 2 Jazzy.
+
+**EXPORT (for ROS 2).** Each row is a ROS 2 Jazzy message in YAML (as `ros2 topic echo` prints it), on the topic
+ROS2_PLAN.md gives it. The files go to `exports/` (git-ignored), named `<map>_<topic>.yaml`.
+
+| Row | Message | Topic | Copy puts on the clipboard |
+|---|---|---|---|
+| Elevation map | `grid_map_msgs/msg/GridMap` (`elevation` layer) | `elevation_map` | a command for the saved file |
+| Cost map | `grid_map_msgs/msg/GridMap` (every layer) | `cost_map` | a command for the saved file |
+| Cost map (Nav2) | `nav_msgs/msg/OccupancyGrid`: −1 unknown, 0–99 cost, 100 lethal | `cost_map_grid` | a command for the saved file |
+| Path | `nav_msgs/msg/Path`: cell centres, heading along the path | `planned_path` | the YAML |
+| Waypoints | `nav_msgs/msg/Path`: the waypoints, heading along the path, stamp = planned arrival time | `waypoints` | the YAML |
+| Waypoints (list) | plain text `[x,y] [x,y] ...` (metres), the husky-stable_ws scripts' arguments (`.txt`) | – | the list |
+| Start pose / Goal pose | `geometry_msgs/msg/PoseStamped` | `start_pose` / `goal_pose` | the YAML |
+
+The maps are up to ~300 KB of YAML, so their Copy writes the file and copies a ready command, to run in a terminal with
+ROS 2 sourced:
+```bash
+ros2 topic pub --once /cost_map grid_map_msgs/msg/GridMap "$(cat '/path/to/AStarTileMap/exports/rugged_cost_map.yaml')"
+```
+Positions are metres in the `map` frame with the map centred on (0, 0); stamps are 0. The writers are in
+`core/RosExport.h` (no SFML, no ROS), and every message type was checked against ROS 2 Jazzy's own definitions. On Linux
+the clipboard belongs to the app, so paste before closing it (unless a clipboard manager keeps it).
+
+**The views** follow the stages of the elevation-mapping pipeline (ETH's `elevation_mapping` / `grid_map` /
+`traversability_estimation`, then Rajput's cost map); the legend beside the panel shows the current one's scale:
+
+| Stage | View | Shows |
+|---|---|---|
+| 1. elevation map (on the robot: sensors fused into a 2.5D height grid; here painted with the brush) | **Elevation** | height, symmetric around 0 m (−max\|z\| … +max\|z\|) |
+| | **Terrain** | the same elevation on the floor sprite: dark brown (low) → floor brown (0 m) → grey (high) |
+| 2. terrain features, from the elevation over small windows | **Slope / Roughness / Step** | 0 → the critical value |
+| 3. traversability, a weighted average of the feature scores | **Traversability** | 1 (ideal) → 0 |
+| 4. cost: lethal below traversability 0.5, else 1 − t, then inflation (what the planner reads) | **Cost** | 0 → 0.5 (worst walkable); lethal cells (inflation included) in a darker red |
+
+Every view colours each cell by its number as a retint of the floor sprite's brown (the data views with the chosen colour
+map), so the tiles keep their texture; there are no wall / pit sprites for now
+(the textures and `Board::updatePitCells()` are kept for when they come back). The lights stay on top as indicators
+(green start, red end, blue path, purple searched, yellow waypoints).
+
+Unknown cells are black.
 
 Editing the map (painting terrain or costs) comes later. For now you place only the start and end.
 
@@ -176,6 +222,8 @@ Editing the map (painting terrain or costs) comes later. For now you place only 
 core/
   GridMap.h/.cpp            size, resolution, centred world coordinates, named float layers (NaN = unknown)
   GridMapFile.h/.cpp        save / load maps as grid_map_msgs/GridMap YAML (+ <name>.endpoints.yaml)
+  RosExport.h/.cpp          EXPORT's ROS 2 messages: OccupancyGrid, Path, PoseStamped (and GridMap via GridMapFile)
+  Waypoints.h/.cpp          path -> waypoints: prunePath (thesis Algorithm 3 + cost rule), makeWaypoints (spacing, yaw, time)
   CostMapParameters.h       every threshold, weight and radius in one struct (→ a ROS parameter file later)
   TerrainGenerator.h/.cpp   building blocks for test terrain: flat map, dunes, hills, noise, blocks
   TerrainFeatures.h/.cpp    computeSlope, computeRoughness, computeStepHeight
@@ -184,7 +232,12 @@ core/
   NavGraph.h                walkable cells and their walkable neighbours (from the iD Tech template, via main)
   PathPlanner.h/.cpp        A* (pathfindingAstar), Dijkstra's, BFS, DFS on the cost layer
 tools/generate_maps.cpp     builds the example maps
+tools/make_control_sprites.py  draws assets/Textures/controls/*.png (keys, arrow keys, mouse buttons)
 src/                        the SFML app (menu, Board = map view, Button, TextBox, Dropdown)
+  Toggle.h/.cpp             a rectangular on / off switch with a label (the Searched toggle)
+  Dialog.h/.cpp             a modal dialog: message, optional text box, buttons (Save changes? / Save a copy as)
+  ExportPanel.h/.cpp        the EXPORT panel: one row per export with Save file / Copy
+  ControlsList.h/.cpp       the panel's Controls list: rows of key / mouse sprites and words
   TerrainBrush.h/.cpp       the Set terrain mode: height / brush choices, Board::setTerrainHeight, Board::updateCostMap
 ```
 
@@ -237,7 +290,7 @@ it stands in for is Fankhauser et al.'s robot-centric elevation mapping (2014, 2
 | **A terrain piece** | A function in `core/TerrainGenerator` that adds to the `elevation` layer |
 | **A feature** | A `compute…()` in `core/TerrainFeatures` that writes a layer, then use it in `computeTraversability()` with a weight and critical value in `CostMapParameters` |
 | **An algorithm** | Add it to `enum class PathAlgorithm` and `getPathAlgorithmNames()` in `core/PathPlanner.h`, write a `pathfinding…()` in `PathPlanner.cpp`, and add a case to `findPath()`. The menu and side panel dropdowns pick it up automatically. |
-| **A view** | Add it to `enum class MapView` and `getMapViewNames()` in `src/Tile.h`, and a case in `Board::getGroundColor()` (the colour of the floor's brown). The view dropdown picks it up automatically. |
+| **A view** | Add it to `enum class MapView` and `getMapViewNames()` in `src/Tile.h`, and a case in `Board::getViewLayer()`, `Board::getViewRange()` and the legend's labels in `Board::drawLegend()`. The view dropdown picks it up automatically. |
 
 ### Not on this branch
 - **The character** (WASD movement) is a relic of TileMap. It is commented out in `main.cpp` and the CMake file, and its files

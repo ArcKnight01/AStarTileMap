@@ -1,0 +1,21 @@
+# Every CostMapParameters field (core/CostMapParameters.h), with the same defaults. "/**" so both cost_map_node and
+# planner_node get them (the planner needs lethal_cost and cost_weight to agree with the cost map).
+# Tune live:  ros2 param set /cost_map_node critical_slope 0.5
+/**:
+  ros__parameters:
+    slope_radius: 0.15
+    roughness_radius: 0.15
+    step_radius: 0.10
+    critical_slope: 0.40          # rad (ETH default 1.0; lower for sand)
+    critical_roughness: 0.05      # m (ETH default)
+    critical_step: 0.12           # m (ETH default)
+    weight_slope: 0.3333333333333333   # 1/3, exactly as the core (0.333 changes the costs)
+    weight_roughness: 0.3333333333333333   # 1/3, exactly as the core (0.333 changes the costs)
+    weight_step: 0.3333333333333333   # 1/3, exactly as the core (0.333 changes the costs)
+    zero_if_any_critical: false
+    traversability_threshold: 0.5 # Rajput
+    lethal_cost: 60.0             # Rajput
+    inflation_radius: 0.2         # Go2 half-width + margin
+    unknown_policy: lethal        # lethal | fixed_cost | free
+    unknown_cost: 0.5
+    cost_weight: 1.0

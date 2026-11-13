@@ -9,15 +9,51 @@
 #include "GridMap.h"
 #include "GridMapFile.h"
 #include "PathPlanner.h"
+#include "RosExport.h"
+#include "Waypoints.h"
+#include <algorithm>
+#include <sstream>
 #include "TerrainFeatures.h"
 #include "TerrainGenerator.h"
 #include "Traversability.h"
+#include "../src/TerrainBrush.h" //the brush kernel is header-only, with no SFML
 
 static int failures = 0;
+
+//true if the straight line between two world positions (metres) passes through the inside of a cell: a slab test on the
+//cell's square in column / row units, shrunk by 1e-9 so a line that only touches a corner or an edge does not count
+static bool crossesCellInside(const GridMap& map, double x0, double y0, double x1, double y1, int cell) {
+	//world -> grid units: u = x / r + columns / 2 grows with the column, v = rows / 2 - y / r grows with the row
+	double r = map.getResolution();
+	double start[2] = { x0 / r + map.getColumns() / 2.0, map.getRows() / 2.0 - y0 / r };
+	double direction[2] = { (x1 - x0) / r, -(y1 - y0) / r };
+	double low[2] = { map.getColumn(cell) + 1e-9, map.getRow(cell) + 1e-9 }, high[2] = { map.getColumn(cell) + 1 - 1e-9, map.getRow(cell) + 1 - 1e-9 };
+	double tEnter = 0, tLeave = 1;
+	for (int axis = 0; axis < 2; axis++) {
+		if (direction[axis] == 0) {
+			if (start[axis] <= low[axis] || start[axis] >= high[axis]) return false;
+			continue;
+		}
+		double t0 = (low[axis] - start[axis]) / direction[axis], t1 = (high[axis] - start[axis]) / direction[axis];
+		tEnter = std::max(tEnter, std::min(t0, t1));
+		tLeave = std::min(tLeave, std::max(t0, t1));
+	}
+	return tEnter < tLeave;
+}
 #define CHECK(cond, ...) do { if (!(cond)) { failures++; std::printf("FAIL: " __VA_ARGS__); std::printf("\n"); } } while (0)
 
 // Cheapest path cost with the planner's own step cost (eq. 3.8), by brute force (Dijkstra with a priority queue).
 // With unitCost every step costs 1, which gives the fewest steps (what BFS minimises). -1 = unreachable.
+/**
+ * Cheapest path cost by brute force (Dijkstra), for checking the planners.
+ *
+ * @param map       Map with a "cost" layer.
+ * @param p         Cost-map parameters (lethal threshold, step cost).
+ * @param start     Start cell index (row * columns + column).
+ * @param end       End cell index (row * columns + column).
+ * @param unitCost  True: every step costs 1 (fewest steps); false: the planner's step cost.
+ * @return          Cheapest path cost, or -1 if the end is unreachable.
+ */
 static double bruteForceCost(const GridMap& map, const CostMapParameters& p, int start, int end, bool unitCost) {
 	const std::vector<float>& cost = map.getLayer("cost");
 	if (isLethal(cost[start], p) || isLethal(cost[end], p)) return -1;
@@ -42,7 +78,16 @@ static double bruteForceCost(const GridMap& map, const CostMapParameters& p, int
 	return -1;
 }
 
-// A path's shape: starts and ends right, only neighbouring steps, never on a lethal cell.
+/**
+ * A path's shape: starts and ends right, only neighbouring steps, never on a lethal cell.
+ *
+ * @param map    Map with a "cost" layer.
+ * @param p      Cost-map parameters (lethal threshold).
+ * @param path   Path as cell indices (row * columns + column), start first.
+ * @param start  Expected first cell index.
+ * @param end    Expected last cell index.
+ * @param what   Label printed in failure messages.
+ */
 static void checkPathShape(const GridMap& map, const CostMapParameters& p, const std::vector<int>& path, int start, int end, const char* what) {
 	CHECK(path.front() == start && path.back() == end, "%s: path does not run from start to end", what);
 	for (std::size_t k = 0; k < path.size(); k++) {
@@ -54,8 +99,21 @@ static void checkPathShape(const GridMap& map, const CostMapParameters& p, const
 	}
 }
 
+/**
+ * Tells whether two values differ by at most a tolerance.
+ *
+ * @param a          First value.
+ * @param b          Second value.
+ * @param tolerance  Largest allowed absolute difference.
+ * @return           True if |a - b| <= tolerance.
+ */
 static bool near(double a, double b, double tolerance) { return std::fabs(a - b) <= tolerance; }
 
+/**
+ * Runs all core checks and prints each failure.
+ *
+ * @return  Exit code: 0 if every check passed, 1 otherwise.
+ */
 int main() {
 	CostMapParameters p;
 
@@ -213,6 +271,150 @@ int main() {
 		CHECK(!crossesStrip(pathfindingAstar(map, avoidCost, start, end)), "costWeight 200: A* detours around the costly strip");
 	}
 
+	// --- ROS 2 exports (checked against the real message types when written; these keep them right without ROS) ---
+	{
+		CHECK(getOccupancyValue(GridMap::getUnknownValue(), p) == -1 && getOccupancyValue(p.lethalCost, p) == 100,
+			"export: OccupancyGrid unknown = -1, lethal = 100");
+		CHECK(getOccupancyValue(0.f, p) == 0 && getOccupancyValue(0.5f, p) == 99 && getOccupancyValue(0.25f, p) == 50,
+			"export: walkable cost 0 .. 0.5 scales to 0 .. 99");
+		GridMap map(10, 10, 0.1);
+		std::vector<int> east = { map.getIndex(2, 5), map.getIndex(3, 5) }, north = { map.getIndex(2, 5), map.getIndex(2, 4) };
+		CHECK(near(getPathYaw(map, east, 0), 0, 1e-9) && near(getPathYaw(map, north, 0), M_PI / 2, 1e-9) && near(getPathYaw(map, north, 1), M_PI / 2, 1e-9),
+			"export: path heading is 0 toward +x (column + 1) and pi/2 toward +y (row - 1), also at the last pose");
+		map.addLayer("cost", 0.f);
+		map.at("cost", 0, 0) = p.lethalCost; //top-left cell: smallest x, largest y
+		std::ostringstream grid;
+		writeOccupancyGridMessage(grid, map, p);
+		std::string text = grid.str();
+		std::string lastRow = text.substr(text.rfind("\n  ") + 3);
+		CHECK(lastRow.rfind("100, 0", 0) == 0, "export: OccupancyGrid data starts at the bottom row, so the top-left cell is first in the last row");
+		std::ostringstream empty;
+		writePathMessage(empty, map, {});
+		CHECK(empty.str().find("poses: []") != std::string::npos, "export: an empty path has poses: []");
+	}
+
+	// --- path -> waypoints (core/Waypoints.h; the first four checks were ros2/terrain_planner's gtests) ---
+	{
+		//true if the straight line between two cell centres stays off lethal cells, sampled 64 times per cell
+		//(independent of getCellsOnSegment, so it can check it)
+		//(was sampled 64 times per cell, but a sample landing exactly on a grid corner is ambiguous; now exact, crossesCellInside)
+		auto isLineClear = [&](const GridMap& map, double x0, double y0, double x1, double y1) {
+			for (int cell = 0; cell < map.getCellCount(); cell++) {
+				if (isLethal(map.getLayer("cost")[cell], p) && crossesCellInside(map, x0, y0, x1, y1, cell)) return false;
+			}
+			return true;
+		};
+		auto cellsAre = [&](const GridMap& map, const std::vector<int>& cells, const std::vector<std::pair<int, int>>& expected) {
+			if (cells.size() != expected.size()) return false;
+			for (std::size_t i = 0; i < cells.size(); i++) {
+				if (map.getColumn(cells[i]) != expected[i].first || map.getRow(cells[i]) != expected[i].second) return false;
+			}
+			return true;
+		};
+		GridMap grid(10, 10, 0.1);
+		grid.addLayer("cost", 0.f);
+		CHECK(cellsAre(grid, getCellsOnSegment(grid, grid.getIndex(0, 0), grid.getIndex(4, 0)), { {0,0}, {1,0}, {2,0}, {3,0}, {4,0} }),
+			"waypoints: a straight line visits each cell once");
+		CHECK(cellsAre(grid, getCellsOnSegment(grid, grid.getIndex(0, 0), grid.getIndex(2, 2)), { {0,0}, {1,0}, {0,1}, {1,1}, {2,1}, {1,2}, {2,2} }),
+			"waypoints: a diagonal through grid corners also visits both side cells of each corner");
+		CHECK(cellsAre(grid, getCellsOnSegment(grid, grid.getIndex(0, 0), grid.getIndex(1, 3)), { {0,0}, {0,1}, {1,1}, {0,2}, {1,2}, {1,3} }),
+			"waypoints: a steep line (1 across, 3 down) finds the one grid corner it passes through");
+		bool coversSamples = true;
+		for (int column = 0; column < 10; column++) {
+			std::vector<int> cells = getCellsOnSegment(grid, grid.getIndex(0, 0), grid.getIndex(column, 9));
+			double x0, y0, x1, y1;
+			grid.getPosition(0, 0, x0, y0);
+			grid.getPosition(column, 9, x1, y1);
+			for (int i = 0; i <= 1000; i++) {
+				int c, r;
+				grid.getCell(x0 + (x1 - x0) * i / 1000, y0 + (y1 - y0) * i / 1000, c, r);
+				coversSamples = coversSamples && std::find(cells.begin(), cells.end(), grid.getIndex(c, r)) != cells.end();
+			}
+		}
+		CHECK(coversSamples, "waypoints: every cell a densely sampled line passes through is among getCellsOnSegment's cells");
+
+		//a straight diagonal run over costly ground: the line equals the path, so it must prune to its ends
+		GridMap costlyDiagonal(10, 10, 0.1);
+		costlyDiagonal.addLayer("cost", 0.3f);
+		std::vector<int> diagonal;
+		for (int k = 0; k < 8; k++) diagonal.push_back(costlyDiagonal.getIndex(k, k));
+		CHECK(prunePath(costlyDiagonal, p, diagonal).size() == 2,
+			"waypoints: a straight diagonal run over costly ground prunes to its ends (corner-touched cells add no cost)");
+
+		std::vector<int> straight;
+		for (int column = 0; column < 10; column++) straight.push_back(grid.getIndex(column, 2));
+		std::vector<int> prunedStraight = prunePath(grid, p, straight);
+		CHECK(prunedStraight.size() == 2 && prunedStraight.front() == straight.front() && prunedStraight.back() == straight.back(),
+			"waypoints: a straight path prunes to its two ends");
+
+		CostMapParameters noInflation = p;
+		noInflation.inflationRadius = 0;
+		GridMap wall(10, 10, 0.1);
+		wall.addLayer("cost", 0.f);
+		for (int row = 0; row < 8; row++) wall.at("cost", 5, row) = p.lethalCost; //a wall with a gap at the bottom
+		double acrossX0, acrossY0, acrossX1, acrossY1, touchX, touchY;
+		wall.getPosition(0, 5, acrossX0, acrossY0);
+		wall.getPosition(9, 5, acrossX1, acrossY1);
+		wall.getPosition(4, 7, touchX, touchY);
+		double cornerX = touchX + 0.05, cornerY = touchY - 0.05; //the bottom-right corner of cell (4, 7): the wall's corner
+		CHECK(!isLineClear(wall, acrossX0, acrossY0, acrossX1, acrossY1) && isLineClear(wall, touchX, touchY, cornerX, cornerY),
+			"test helper: a line through the wall is caught, one that only touches its corner is not");
+		PathResult aroundWall = findPath(wall, noInflation, PathAlgorithm::AStar, wall.getIndex(0, 0), wall.getIndex(9, 0));
+		std::vector<int> prunedWall = prunePath(wall, noInflation, aroundWall.path);
+		bool segmentsClear = !prunedWall.empty();
+		for (std::size_t i = 1; i < prunedWall.size(); i++) {
+			double x0, y0, x1, y1;
+			wall.getPosition(wall.getColumn(prunedWall[i - 1]), wall.getRow(prunedWall[i - 1]), x0, y0);
+			wall.getPosition(wall.getColumn(prunedWall[i]), wall.getRow(prunedWall[i]), x1, y1);
+			segmentsClear = segmentsClear && isLineClear(wall, x0, y0, x1, y1);
+		}
+		CHECK(prunedWall.size() < aroundWall.path.size() && segmentsClear && getPathCost(wall, noInflation, prunedWall) <= aroundWall.cost + 1e-6,
+			"waypoints: pruning around a wall shortens the path, never crosses the wall, and costs no more");
+
+		WaypointParameters waypointParameters;
+		std::vector<Waypoint> wallWaypoints = makeWaypoints(wall, prunedWall, waypointParameters);
+		bool cornersKept = true, waypointsClear = true;
+		for (int corner : prunedWall) {
+			double x, y;
+			wall.getPosition(wall.getColumn(corner), wall.getRow(corner), x, y);
+			cornersKept = cornersKept && std::any_of(wallWaypoints.begin(), wallWaypoints.end(),
+				[&](const Waypoint& waypoint) { return std::hypot(waypoint.x - x, waypoint.y - y) < 1e-9; });
+		}
+		for (std::size_t i = 1; i < wallWaypoints.size(); i++) {
+			waypointsClear = waypointsClear && isLineClear(wall, wallWaypoints[i - 1].x, wallWaypoints[i - 1].y, wallWaypoints[i].x, wallWaypoints[i].y);
+			waypointsClear = waypointsClear && std::hypot(wallWaypoints[i].x - wallWaypoints[i - 1].x, wallWaypoints[i].y - wallWaypoints[i - 1].y) <= waypointParameters.spacing + 1e-9;
+		}
+		CHECK(cornersKept, "waypoints: every corner of the pruned path is a waypoint");
+		CHECK(waypointsClear, "waypoints: no line between two waypoints touches the wall, and none is longer than the spacing");
+
+		GridMap line(21, 3, 0.1);
+		line.addLayer("cost", 0.f);
+		WaypointParameters halfMetre;
+		halfMetre.spacing = 0.5;
+		halfMetre.nominalSpeed = 1.0;
+		std::vector<int> twoMetres = { line.getIndex(0, 1), line.getIndex(20, 1) }; //2 m along +x
+		std::vector<Waypoint> evenly = makeWaypoints(line, twoMetres, halfMetre, M_PI / 2);
+		bool evenSteps = evenly.size() == 5; //0, 0.5, 1.0, 1.5, 2.0 m
+		for (std::size_t i = 1; evenSteps && i < evenly.size(); i++) {
+			evenSteps = near(evenly[i].x - evenly[i - 1].x, 0.5, 1e-9) && near(evenly[i].time - evenly[i - 1].time, 0.5, 1e-9);
+		}
+		CHECK(evenSteps && near(evenly.front().yaw, 0, 1e-9) && near(evenly.back().yaw, M_PI / 2, 1e-9),
+			"waypoints: 2 m at 0.5 m spacing gives 5 waypoints 0.5 s apart at 1 m/s, heading +x, the last taking the goal's yaw");
+		//a waypoint exactly on a lethal cell's corner (the middle of (0,0) -> (3,3), beside lethal (2,1)) must not slow its piece
+		GridMap cornerMap(10, 10, 0.1);
+		cornerMap.addLayer("cost", 0.f);
+		cornerMap.at("cost", 2, 1) = p.lethalCost;
+		std::vector<Waypoint> pastCorner = makeWaypoints(cornerMap, { cornerMap.getIndex(0, 0), cornerMap.getIndex(3, 3) }, waypointParameters);
+		CHECK(pastCorner.size() == 3 && near(pastCorner.back().time, 3 * std::sqrt(2.0) * 0.1 / waypointParameters.nominalSpeed, 1e-9),
+			"waypoints: a waypoint on a lethal cell's corner does not slow its piece (cost read just before it)");
+		std::vector<Waypoint> listed(2);
+		listed[0].x = -0.35; listed[0].y = 1.2; listed[1].x = 2; listed[1].y = -0.05;
+		CHECK(getWaypointListText(listed) == "[-0.35,1.20] [2.00,-0.05]", "waypoints: the husky-stable_ws list is [x,y] [x,y] in metres");
+		double cheapTime = makeWaypoints(line, twoMetres, waypointParameters).back().time;
+		line.addLayer("cost", 0.5f);
+		CHECK(makeWaypoints(line, twoMetres, waypointParameters).back().time > cheapTime, "waypoints: costly cells are slower");
+	}
+
 	// --- the example maps in maps/ (made by ./build/generate_maps) ---
 	{
 		GridMap map; int start, end;
@@ -230,6 +432,69 @@ int main() {
 		GridMap zeroOnly = map;
 		for (float& c : zeroOnly.getLayer("cost")) if (c > 0.f) c = p.lethalCost;
 		CHECK(pathfindingBFS(zeroOnly, p, start, end).path.empty(), "maps: hybrid has no route that avoids rugged terrain");
+	}
+
+	// --- the terrain brush's tapered Gaussian kernel (src/TerrainBrush.h) ---
+	{
+		CHECK(buildGaussianKernel(1).size() == 1 && buildGaussianKernel(1)[0] == 1.f, "brush: a 1-cell brush is a single weight of 1");
+		for (int width : getBrushWidths()) {
+			std::vector<float> kernel = buildGaussianKernel(width);
+			int k = (width - 1) / 2;
+			CHECK(kernel[k * width + k] == 1.f, "brush %d: the centre weight is 1", width);
+			bool inRange = true, symmetric = true;
+			for (int r = 0; r < width; r++) for (int c = 0; c < width; c++) {
+				float w = kernel[r * width + c];
+				inRange = inRange && w >= 0.f && w <= 1.f;
+				symmetric = symmetric && w == kernel[c * width + r] && w == kernel[r * width + (width - 1 - c)];
+			}
+			CHECK(inRange && symmetric, "brush %d: weights in [0, 1] and symmetric", width);
+			//the taper is 0 at width / 2 cells from the centre, so a 3 x 3 brush's corner cells (1.41 cells out) keep a
+			//little weight and wider brushes' corners get none
+			if (width == 3) CHECK(kernel[0] > 0.f && kernel[0] < 0.05f, "brush 3: the corners keep a small weight");
+			if (width > 3) CHECK(kernel[0] == 0.f, "brush %d: the taper reaches 0 at the box's corners", width);
+		}
+	}
+
+	// --- brush cost table: one click of each preset height on a flat map, with each brush width ---
+	// Prints the worst cost of the cells around the patch (cN = worst walkable cost, L = lethal), for TerrainBrush.h.
+	// Also checks that the elevation changes only inside the brush box.
+	{
+		std::printf("brush cost table (one click on a flat 0.1 m map; cN = worst walkable cost, L = lethal):\n  brush ");
+		const float heights[] = { 0.02f, 0.05f, 0.08f, 0.10f, 0.15f, 0.50f };
+		for (float h : heights) std::printf("  %+.2f m", h);
+		std::printf("\n");
+		for (int width : getBrushWidths()) {
+			std::printf("  %-5d", width);
+			for (float h : heights) {
+				GridMap map(21, 21, 0.1);
+				map.addLayer("elevation", 0.f);
+				std::vector<float> kernel = buildGaussianKernel(width);
+				int k = (width - 1) / 2, centre = 10;
+				for (int r = 0; r < width; r++) for (int c = 0; c < width; c++) {
+					map.at("elevation", centre - k + c, centre - k + r) += h * kernel[r * width + c];
+				}
+				bool outsideFlat = true;
+				for (int r = 0; r < 21; r++) for (int c = 0; c < 21; c++) {
+					bool inside = std::abs(c - centre) <= k && std::abs(r - centre) <= k;
+					if (!inside) outsideFlat = outsideFlat && map.at("elevation", c, r) == 0.f;
+				}
+				CHECK(outsideFlat, "brush %d: one click changes no elevation outside the box", width);
+				runCostMapPipeline(map, p);
+				float worst = 0.f; bool lethal = false;
+				for (float c : map.getLayer("cost")) {
+					if (isLethal(c, p)) lethal = true;
+					else worst = std::max(worst, c);
+				}
+				if (lethal) std::printf("  L      ");
+				else std::printf("  c%.2f  ", worst);
+			}
+			std::printf("\n");
+		}
+		//flatten: height 0 at full weight brings the centre back to 0 m
+		std::vector<float> kernel = buildGaussianKernel(5);
+		float z = 0.3f;
+		z = z * (1.f - kernel[2 * 5 + 2]);
+		CHECK(z == 0.f, "brush: flattening sets the centre to 0 m");
 	}
 
 	std::printf(failures ? "%d FAILURE(S)\n" : "all core checks passed\n", failures);

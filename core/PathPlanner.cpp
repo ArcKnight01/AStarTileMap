@@ -42,14 +42,28 @@ double getPathCost(const GridMap& map, const CostMapParameters& parameters, cons
 	return total;
 }
 
-//shared by every algorithm: start and end must be on the map and walkable
+/**
+ * Shared by every algorithm: start and end must be on the map and walkable.
+ *
+ * @param map    The map.
+ * @param nav    Navigation graph of the map's walkable cells.
+ * @param start  Start cell (row * columns + column).
+ * @param end    End cell (row * columns + column).
+ * @return       True if both cells are on the map and in the graph.
+ */
 static bool isPlannable(const GridMap& map, const NavGraph& nav, int start, int end) {
 	vertex v;
 	return start >= 0 && start < map.getCellCount() && end >= 0 && end < map.getCellCount()
 		&& nav.getVertex(map.getColumn(start), map.getRow(start), v) && nav.getVertex(map.getColumn(end), map.getRow(end), v);
 }
 
-//follows parent from the end back to the start, then reverses
+/**
+ * Follows parent from the end back to the start, then reverses.
+ *
+ * @param parent  Cell each cell was reached from, -1 for the start.
+ * @param end     End cell (row * columns + column).
+ * @return        Cell indices from start to end.
+ */
 static std::vector<int> retracePath(const std::vector<int>& parent, int end) {
 	std::vector<int> path;
 	for (int cell = end; cell != -1; cell = parent[cell]) {

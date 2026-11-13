@@ -74,7 +74,8 @@ void Board::confirmPlacement() {
 		if (endExists && placingTile == endPos) endExists = false;
 		break;
 	}
-	navDirty = true; //re-plan
+	navDirty = true;          //re-plan
+	hasUnsavedChanges = true; //the start / end changed
 	cancelPlacement();
 }
 

@@ -1,2 +1,7 @@
 build/
 .cache/
+# EXPORT's ROS 2 message files (made by the app)
+exports/
+# colcon build outputs (ros2/ package built from the repo root)
+install/
+log/

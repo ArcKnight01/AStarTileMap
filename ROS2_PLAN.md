@@ -191,15 +191,44 @@ This is the part most likely to have bugs, so it gets its own tests.
 
 The controller wants `(x, y, yaw)` waypoints with times, not a list of 10 cm cells.
 
-1. **Prune** (Rajput Algorithm 3): drop cells that lie on a straight line between their neighbours, and shortcut corners
-   where the straight segment crosses no lethal cell and costs no more than the original path.
-2. **Sample** every `waypoint_spacing` metres (e.g. 0.3–0.5 m, about the Go2's body length).
-3. **Heading:** `yaw = atan2(y[i+1] − y[i], x[i+1] − x[i])`; the last waypoint takes the goal's yaw.
-4. **Time:** distance / a nominal speed, slower on costlier cells (a scaling that can be tuned later).
-5. Publish as `nav_msgs/Path` in `map_frame`.
+**Built** (ROS 2 Jazzy target; the code is `core/Waypoints.h/.cpp`, plain C++ shared by the app and `planner_node`,
+tested in `tests/test_costmap.cpp` and `ros2/terrain_planner/test/test_waypoints.cpp`):
+
+1. **Prune** (Rajput 2023, thesis Algorithm 3, p. 36, after Noreen et al. 2019): keep a cell only where the straight line
+   from the last kept cell stops being allowed. Allowed: it passes through no lethal or unknown cell, **and** it costs no
+   more than the cells it replaces (eq. 3.8 terms). The cost rule is ours (the thesis checks collision only), so a line
+   never cuts across costly ground A* went around. The cells on a line are found exactly (Amanatides & Woo 1987 grid
+   traversal). A line may touch a lethal cell's corner, as A*'s own diagonal steps do (see the note below).
+   The thesis's printed Algorithm 3 has two index slips (`delete node(x_i)` should be `x_{i+1}`; `x = x_i + 1` should be
+   `x = x_{i+1}`) and never checks `x_0`; ours walks forward from the start and keeps the same cells.
+2. **Sample**: every corner of the pruned path is a waypoint; each straight stretch is split into equal pieces of at most
+   `waypoint_spacing` (0.4 m, about the Go2's body length). Keeping the corners means no line between two waypoints
+   cuts a corner the pruned path went around.
+3. **Heading:** `yaw = atan2(y[k+1] − y[k], x[k+1] − x[k])`; the last waypoint takes the goal's yaw.
+4. **Time:** each piece takes length / speed, `speed = nominal_speed / (1 + cost_slowdown · cost)` (0.5 m/s, 1.0), with the
+   cost read where the piece arrives.
+5. Publish as `nav_msgs/msg/Path` on `waypoints` in `map_frame`, each pose stamped with its planned arrival time.
+
+On the example maps: `flat` 39 A* cells → 2 pruned → 11 waypoints; `rugged` 35 → 7 → 14; `dungeon` 163 → 34 → 65;
+`hybrid` 138 → 14 → 44. The app draws them (yellow lights, the **Waypoints** toggle / W) and EXPORT writes them as the
+`nav_msgs/msg/Path` above or as a husky-stable_ws argument list (`[x,y] [x,y] ...`).
+
+> **Open: A\* cuts corners.** `buildNavGraph` lets A\* step diagonally between two cells when one of the cells beside the
+> step is lethal (on `dungeon` 23 of 75 diagonal steps, on `hybrid` 20 of 32), so the path touches a lethal cell's
+> corner. With inflation those cells are only the safety margin, but `dungeon` has no inflation. Pruning allows the same
+> corner touches so its lines are never riskier than the path. Forbidding these diagonal steps in A\* would remove them
+> from both.
 
 How exactly `quadruped_ros2_control` takes the waypoints (a path topic, an action, or velocity commands from a follower) is
 still open (§10). The `waypoints` topic is the interface either way.
+
+### Reference: Rohit Rajput's method on the M4 (ROS 1 Noetic, not what we build)
+
+For comparison only; **we target ROS 2 Jazzy**, a ground-only robot, and the standard `nav_msgs/msg/Path`, and no code
+is taken from his. In `~/Repos/ROS1/M4_Simulation` (package `grid_3d_nav`), every A\* cell is a waypoint, sent as a
+custom `GlobalPath` (pose + walk / fly flag) and split by mode; pruning is written but not called, and no heading or time
+is set. **`ROS1_REFERENCE_NOTES.md`** has the whole chain (elevation mapping → cost map → A\* → waypoints → controller)
+for the M4 and for husky-stable_ws (Frank Laubach and Aidan).
 
 ---
 

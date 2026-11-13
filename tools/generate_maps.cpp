@@ -21,6 +21,15 @@ static const double RESOLUTION = 0.1; //m per cell -> a 7.2 m x 7.2 m map
 //how rugged the rugged map is (metres)
 static double RUGGED_DUNES = 0.06, RUGGED_RIPPLES = 0.02, RUGGED_NOISE = 0.008;
 
+/**
+ * Prints one line of statistics for a map: lethal and zero-cost shares, mean cost, and A* / BFS results.
+ *
+ * @param name        Map name shown at the start of the line.
+ * @param map         Map with a "cost" layer.
+ * @param parameters  Cost-map parameters (lethal threshold, step cost).
+ * @param start       Start cell index (row * columns + column).
+ * @param end         End cell index (row * columns + column).
+ */
 static void printSummary(const char* name, const GridMap& map, const CostMapParameters& parameters, int start, int end) {
 	const std::vector<float>& cost = map.getLayer("cost");
 	int lethal = 0, zero = 0;
@@ -37,12 +46,24 @@ static void printSummary(const char* name, const GridMap& map, const CostMapPara
 		astar.path.size(), astar.cost, bfs.path.size(), bfs.cost);
 }
 
+/**
+ * Builds the flat map: height 0 everywhere, run through the cost-map pipeline.
+ *
+ * @param parameters  Cost-map parameters for the pipeline.
+ * @return            The SIZE x SIZE flat map with its cost layer.
+ */
 static GridMap buildFlat(const CostMapParameters& parameters) {
 	GridMap map = createFlatMap(SIZE, SIZE, RESOLUTION);
 	runCostMapPipeline(map, parameters);
 	return map;
 }
 
+/**
+ * Builds the rugged map: dunes, ripples, steep hills and surface noise, run through the cost-map pipeline.
+ *
+ * @param parameters  Cost-map parameters for the pipeline.
+ * @return            The SIZE x SIZE rugged map with its cost layer.
+ */
 static GridMap buildRugged(const CostMapParameters& parameters) {
 	GridMap map = createFlatMap(SIZE, SIZE, RESOLUTION);
 	addDunes(map, RUGGED_DUNES, 2.4, 3.0, 0.6);    //long rolling dunes
@@ -57,6 +78,15 @@ static GridMap buildRugged(const CostMapParameters& parameters) {
 	return map;
 }
 
+/**
+ * Builds the dungeon map from maps/dungeon.txt (20 x 20 tiles) scaled to SIZE x SIZE cells, writing the cost layer directly.
+ *
+ * @param parameters  Cost-map parameters (lethalCost is used for walls).
+ * @param map         Output: the dungeon map with elevation and cost layers.
+ * @param start       Output: start cell index (row * columns + column), -1 = none in the file.
+ * @param end         Output: end cell index (row * columns + column), -1 = none in the file.
+ * @return            True on success; false if maps/dungeon.txt is missing or not 20 x 20.
+ */
 static bool buildDungeon(const CostMapParameters& parameters, GridMap& map, int& start, int& end) {
 	//old format: 400 numbers (0 ground, 1 wall, 2 start, 3 end), row by row, for a 20 x 20 map
 	std::ifstream file("maps/dungeon.txt");
@@ -102,6 +132,12 @@ static const Pass PASSES[3] = {
 	{ 56, 68, 0.010, 0.006 }, //right: smoothest
 };
 
+/**
+ * Builds the hybrid map: a walled dungeon zone, a ridge with three rugged passes, and flat ground below.
+ *
+ * @param parameters  Cost-map parameters for the pipeline.
+ * @return            The SIZE x SIZE hybrid map with its cost layer.
+ */
 static GridMap buildHybrid(const CostMapParameters& parameters) {
 	GridMap map = createFlatMap(SIZE, SIZE, RESOLUTION);
 	//dungeon zone (rows 0-33): two 0.5 m walls make a zig-zag corridor down from the top-left room
@@ -137,7 +173,14 @@ static GridMap buildHybrid(const CostMapParameters& parameters) {
 	return map;
 }
 
-//checks for hybrid: (1) treating every costly cell as blocked leaves no path, (2) there are three separate passes
+/**
+ * Checks for hybrid: (1) treating every costly cell as blocked leaves no path, (2) there are three separate passes.
+ *
+ * @param map         The hybrid map with its cost layer.
+ * @param parameters  Cost-map parameters (lethal threshold, step cost).
+ * @param start       Start cell index (row * columns + column).
+ * @param end         End cell index (row * columns + column).
+ */
 static void checkHybrid(const GridMap& map, const CostMapParameters& parameters, int start, int end) {
 	GridMap zeroOnly = map;
 	for (float& c : zeroOnly.getLayer("cost")) {
@@ -175,6 +218,11 @@ static void checkHybrid(const GridMap& map, const CostMapParameters& parameters,
 	}
 }
 
+/**
+ * Builds, checks and saves the flat, rugged, dungeon and hybrid example maps in maps/.
+ *
+ * @return  Exit code: 0 on success.
+ */
 int main() {
 	CostMapParameters parameters;
 

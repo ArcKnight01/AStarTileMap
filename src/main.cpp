@@ -16,14 +16,27 @@
 #include "Button.h"
 #include "TextBox.h"
 #include "Dropdown.h"
+#include "Toggle.h"
+#include "Dialog.h"
+#include "ExportPanel.h"
+#include "ControlsList.h"
+#include "GridMapFile.h"
+#include "RosExport.h"
+#include <filesystem>
+#include <fstream>
 
 using namespace sf;
 /* DEFINE GAMESTATES HERE */
 // Which screen is showing:
 //   MENU    --START (click it, or press Enter)----------> PLAYING
-//   PLAYING --SAVE & MENU (click it, or press E)--------> MENU  (saves the map first)
-//   PLAYING --Esc---------------------------------------> MENU  (without saving)
+//   PLAYING --MENU (click it, or press Esc)-------------> MENU  (asks "Save changes?" first if the map has unsaved edits)
+//   PLAYING --window X----------------------------------> closes the program (asks "Save changes?" the same way)
 //   MENU    --EXIT (click it, or press Esc)-------------> closes the program
+// SAVE (or Ctrl+S) saves without leaving; on an example map it asks for a name and saves a copy instead.
+// (was: PLAYING --SAVE & MENU (click it, or press E)--> MENU, always saving; PLAYING --Esc--> MENU, never saving and
+//  without asking; the window X closed without saving)
+// TODO: START both loads and creates (type a saved map's name, or a new one), which relies on remembering map names.
+// Later this could become a Load dropdown of the saved maps (Board::getSavedMapNames()) and a separate New map button.
 enum GameState {
 	MENU,
 	PLAYING
@@ -33,7 +46,17 @@ enum GameState {
 const float windowW = 1100; //the MENU window
 const float windowH = 800;
 const float boardMargin = 40;  //empty space between the window edge and the map
-const float panelWidth = 260;  //the side panel right of the map
+const float panelWidth = 300;  //the side panel right of the map (was 260; widened so the Searched and Waypoints toggles fit side by side)
+//the colour-scale legend: a column between the map and the panel's text, controls and buttons (Board::drawLegend)
+const float legendColumnWidth = 104;
+//the PLAYING window is at least this tall, so the side panel fits: its text ends about 740 px down in Set terrain mode,
+//and the SAVE / EXPORT / MENU stack (3 x 44 px + 2 x 12 px gaps) sits 40 px above the bottom with about 20 px to spare
+//(was windowH = 800 before the searched-cells toggle, then 880 with the buttons side by side)
+//(then 960; now 1040: the Colours dropdown added three lines, so the text ends about 815 px down)
+const float playMinHeight = 1040;
+//the SAVE / EXPORT / MENU buttons, stacked at the bottom of the panel: each this tall, with at least this much space between
+const float panelButtonHeight = 44;
+const float panelButtonGap = 12;
 //PLAYING: the window resizes to the map. Each cell gets the biggest of these sizes that fits on the screen, so the
 //20 x 20 sprites are always drawn at a clean scale (x2, x1, x1/2, x1/4); only a map too big even for 5 px cells is
 //squeezed to fit.
@@ -41,7 +64,13 @@ const float cellSizes[] = { 40, 20, 10, 5 };
 //height of one line of the side panel text (19 pt Candal), used to place the panel dropdowns in the gaps left in the text
 const float panelLineHeight = 25;
 
-//places a text so that its centre is at (x, y)
+/**
+ * Places a text so that its centre is at (x, y).
+ *
+ * @param text  Text to position; its origin is moved to the centre of its local bounds.
+ * @param x     Horizontal centre, in window coordinates (pixels).
+ * @param y     Vertical centre, in window coordinates (pixels).
+ */
 void centerText(Text& text, float x, float y) {
 	FloatRect bounds = text.getLocalBounds();
 	text.setOrigin(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
@@ -49,6 +78,13 @@ void centerText(Text& text, float x, float y) {
 }
 
 //main code (an optional map name on the command line pre-fills the menu's text box: ./AStarTileMap dungeon)
+/**
+ * Main code: runs the menu and the costmap editor / planner until the window closes.
+ *
+ * @param argc  Number of command-line arguments.
+ * @param argv  Command-line arguments; argv[1], if given, is a map name that pre-fills the menu's text box.
+ * @return      Exit code: 0 on success.
+ */
 int main(int argc, char* argv[])
 {
 	// Create a Window to Display Graphics, Define Size and Window Name
@@ -108,22 +144,75 @@ int main(int argc, char* argv[])
 	exitButton.setup(font, "EXIT", Vector2f(windowW / 2 + 160, 705), Vector2f(300, 70), 40);
 
 	// --- PLAYING screen: side panel to the right of the map ---
-	Button saveMenuButton;
-	//(positioned by layoutForMap() when a map starts)
+	//Button saveMenuButton; (was one SAVE & MENU button that always saved)
+	//SAVE, EXPORT and MENU in a row at the bottom of the panel (positioned by layoutForMap() when a map starts)
+	Button saveButton;
+	Button exportButton;
+	Button menuButton;
+	//the "Save changes?" / "Save a copy as" dialog, and the EXPORT panel; while either is open it takes all input
+	Dialog dialog;
+	dialog.setup(font);
+	ExportPanel exportPanel;
+	//the EXPORT rows: what is exported, as which ROS 2 message, on which topic (ROS2_PLAN.md), and into which file
+	//(exports/<map>_<suffix>.yaml). The first three are whole maps (up to ~300 KB), so Copy puts a ros2 topic pub
+	//command for the saved file on the clipboard; the path and the poses are small, so Copy puts the YAML itself there.
+	struct ExportItem {
+		std::string name;
+		std::string type;  //ROS 2 message type (or what the plain text is)
+		std::string topic; //topic name ("" for plain text that is not a message)
+		std::string file;  //file name after "<map>_", with its extension
+		bool large;        //true: Copy gives a command for the file instead of the YAML
+	};
+	const std::vector<ExportItem> exportItems = {
+		{ "Elevation map",    "grid_map_msgs/msg/GridMap",     "elevation_map", "elevation_map.yaml",  true },
+		{ "Cost map",         "grid_map_msgs/msg/GridMap",     "cost_map",      "cost_map.yaml",       true },
+		{ "Cost map (Nav2)",  "nav_msgs/msg/OccupancyGrid",    "cost_map_grid", "cost_map_grid.yaml",  true },
+		{ "Path",             "nav_msgs/msg/Path",             "planned_path",  "planned_path.yaml",   false },
+		{ "Waypoints",        "nav_msgs/msg/Path",             "waypoints",     "waypoints.yaml",      false }, //stamp = arrival time
+		{ "Waypoints (list)", "[x,y] [x,y] ... (husky-stable_ws arguments)", "", "waypoints_list.txt", false },
+		{ "Start pose",       "geometry_msgs/msg/PoseStamped", "start_pose",    "start_pose.yaml",     false },
+		{ "Goal pose",        "geometry_msgs/msg/PoseStamped", "goal_pose",     "goal_pose.yaml",      false }
+	};
+	{
+		std::vector<std::string> names, details;
+		for (const ExportItem& item : exportItems) {
+			names.push_back(item.name);
+			details.push_back(item.topic.empty() ? item.type : item.type + " -> /" + item.topic);
+		}
+		exportPanel.setup(font, names, details);
+	}
+	//a short message over the bottom of the map after saving ("Saved maps/rugged.gridmap"), shown for toastSeconds
+	std::string toastText;
+	Clock toastClock;
+	const float toastSeconds = 2.5f;
 	Text panelText("", font, 19);
+	//the Controls list at the bottom of the panel text: rows of key / mouse sprites and words (ControlsList.h)
+	ControlsList controlsList;
+	controlsList.setup(font, 17, panelLineHeight);
+	//whether the cells the algorithm searched light up purple (same as pressing S); it sits on its own line under the
+	//dropdowns (placed by layoutPanel()), with a purple track to match the searched lights. Off: only the count is shown.
+	//(was "Searched (S)", 240 x 24, alone on its line; the S and W keys are now in the Controls rows)
+	Toggle searchedToggle;
+	searchedToggle.setup(font, "Searched", Vector2f(0, 0), Vector2f(136, 24), true, Color(150, 80, 200), 15);
+	//beside it: the path drawn as its waypoints (yellow) instead of every cell (blue), same as pressing W
+	Toggle waypointsToggle;
+	waypointsToggle.setup(font, "Waypoints", Vector2f(0, 0), Vector2f(136, 24), false, Color(220, 190, 50), 15);
 	//Each panel dropdown sits in a gap of two empty lines left under its label in the panel text (placed by layoutPanel()).
 	//(was 240 x 40 with three empty lines per gap; 36 px tall fits two lines, so the panel has room for five dropdowns)
-	const Vector2f panelDropdownSize(240, 36);
+	const Vector2f panelDropdownSize(280, 36); //(was 240 wide, in the 260 px panel)
 	//the path algorithm, changeable while playing (the menu's dropdown picks the first one). Changing it re-plans at once.
 	Dropdown panelAlgorithmDropdown;
 	panelAlgorithmDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getPathAlgorithmNames());
 	//the view (same as pressing V)
 	Dropdown viewDropdown;
 	viewDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getMapViewNames());
+	//the data views' colour scale: red-yellow-green, viridis or grayscale (Tile.h ColorMap)
+	Dropdown colorMapDropdown;
+	colorMapDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getColorMapNames());
 	//what a left click on the map does: place the start / end, or set terrain (TerrainBrush.h)
 	Dropdown clickModeDropdown;
 	clickModeDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getClickModeNames());
-	//only shown with "Set terrain": the height the brush writes, and the brush size
+	//only shown with "Set terrain": the height the brush adds (0 flattens), and the brush size
 	Dropdown terrainHeightDropdown;
 	terrainHeightDropdown.setup(font, Vector2f(0, 0), panelDropdownSize, getTerrainHeightNames(), 4); //starts on Mound +0.05 m (was Ledge +0.15 m)
 	Dropdown brushDropdown;
@@ -131,12 +220,12 @@ int main(int argc, char* argv[])
 	ClickMode clickMode = ClickMode::PlaceStartEnd;
 	bool isPaintingTerrain = false; //the left button is held down in Set terrain mode: moving the mouse keeps painting
 	int lastPaintedTile = -1;       //so holding the mouse still doesn't paint the same cell every event
-	float panelLeft = 0;            //left edge of the side panel (set by layoutForMap())
+	float panelLeft = 0;            //left edge of the side panel's text, controls and buttons (set by layoutForMap())
+	float panelBottom = 0;          //bottom of the side panel (the window height less the margin; set by layoutForMap())
 	//the height the brush paints (m): picking a preset in the Height dropdown sets it, Up / Down change it in 0.01 m
 	//steps (Shift: 0.05 m), so heights between the presets can be painted too
 	float brushElevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation;
-	//how far one click moves the brushed cells toward brushElevation, in percent (Left / Right; TerrainBrush.h)
-	int brushStrength = brushStrengthDefault;
+	//(was: int brushStrength, how far one click moved the cells toward the height, 10 % .. 100 % on Left / Right)
 
 	//the brush height as shown in the panel, e.g. "+0.07 m"
 	auto getBrushElevationText = [&]() {
@@ -150,11 +239,13 @@ int main(int argc, char* argv[])
 		std::vector<std::pair<std::string, Dropdown*>> dropdowns = {
 			{ "Algorithm:", &panelAlgorithmDropdown },
 			{ "View (V):", &viewDropdown },
+			{ "Colours:", &colorMapDropdown },
 			{ "Left click:", &clickModeDropdown }
 		};
 		if (clickMode == ClickMode::SetTerrain) {
 			dropdowns.push_back({ "Height: " + getBrushElevationText() + " (Up/Down)", &terrainHeightDropdown });
-			dropdowns.push_back({ "Brush: " + std::to_string(brushStrength) + "% (Left/Right)", &brushDropdown });
+			//dropdowns.push_back({ "Brush: " + std::to_string(brushStrength) + "% (Left/Right)", &brushDropdown }); (was)
+			dropdowns.push_back({ "Brush:", &brushDropdown });
 		}
 		return dropdowns;
 	};
@@ -168,6 +259,11 @@ int main(int argc, char* argv[])
 			float labelTop = boardMargin + (firstPanelDropdownLine + i * panelDropdownLines) * panelLineHeight;
 			dropdowns[i].second->setCenter(Vector2f(panelLeft + panelDropdownSize.x / 2, labelTop + panelLineHeight + panelDropdownSize.y / 2 + 2));
 		}
+		//the searched-cells toggle: on the first line after the dropdowns, centred in that line
+		float toggleLineTop = boardMargin + (firstPanelDropdownLine + (int)dropdowns.size() * panelDropdownLines) * panelLineHeight;
+		//the two toggles side by side, 136 px each with 8 px between them, filling the dropdowns' 280 px
+		searchedToggle.setCenter(Vector2f(panelLeft + 68, toggleLineTop + panelLineHeight / 2));
+		waypointsToggle.setCenter(Vector2f(panelLeft + 212, toggleLineTop + panelLineHeight / 2));
 	};
 
 	//Window size. Each screen is laid out in a fixed area (layoutW x layoutH drawing units). The program sizes the window
@@ -203,7 +299,7 @@ int main(int argc, char* argv[])
 	auto layoutForMap = [&](Board& board) {
 		VideoMode desktop = VideoMode::getDesktopMode();
 		//room for the board on this screen (leaving space for the title bar, a taskbar and the side panel)
-		float roomW = std::max(200.f, (float)desktop.width - 2 * boardMargin - panelWidth - boardMargin - 40);
+		float roomW = std::max(200.f, (float)desktop.width - 2 * boardMargin - legendColumnWidth - panelWidth - boardMargin - 40);
 		float roomH = std::max(200.f, (float)desktop.height - 2 * boardMargin - 120);
 		int columns = board.map.getColumns(), rows = board.map.getRows();
 		float cell = 0;
@@ -212,18 +308,29 @@ int main(int argc, char* argv[])
 		}
 		if (cell == 0) cell = std::min(roomW / columns, roomH / rows); //too big even for 5 px cells: squeeze it
 		float boardPixelsW = columns * cell, boardPixelsH = rows * cell;
-		//the panel needs about windowH of height (text, view dropdown, SAVE & MENU), so small maps get a taller window
-		float playW = boardMargin + boardPixelsW + boardMargin + panelWidth + boardMargin;
-		float playH = std::max(windowH, boardPixelsH + 2 * boardMargin);
+		//the panel needs about playMinHeight of height (text, dropdowns, toggle, SAVE & MENU), so small maps get a taller window
+		float playW = boardMargin + boardPixelsW + boardMargin + legendColumnWidth + panelWidth + boardMargin;
+		//float playH = std::max(windowH, boardPixelsH + 2 * boardMargin); (was at least the menu's height)
+		float playH = std::max(playMinHeight, boardPixelsH + 2 * boardMargin);
 		board.setScreenArea(boardPixelsW, boardPixelsH, Vector2f(boardMargin, (playH - boardPixelsH) / 2));
 		resizeWindow(playW, playH);
-		panelLeft = 2 * boardMargin + boardPixelsW;
+		//panelLeft = 2 * boardMargin + boardPixelsW; (was; the legend column now comes first)
+		panelLeft = 2 * boardMargin + boardPixelsW + legendColumnWidth;
+		panelBottom = playH - boardMargin;
 		panelText.setPosition(panelLeft, boardMargin);
 		//(the view dropdown was set up here at boardMargin + 4 * 25 + 25, under "View (V):" on line 3, before the
 		//algorithm and terrain dropdowns were added; layoutPanel() now places them all)
 		//viewDropdown.setup(font, Vector2f(panelLeft + 120, boardMargin + 4 * 25 + 25), Vector2f(240, 40), getMapViewNames(), viewDropdown.getSelectedIndex());
 		layoutPanel();
-		saveMenuButton.setup(font, "SAVE & MENU", Vector2f(panelLeft + panelWidth / 2, playH - boardMargin - 40), Vector2f(240, 70), 26);
+		//saveMenuButton.setup(font, "SAVE & MENU", Vector2f(panelLeft + panelWidth / 2, playH - boardMargin - 40), Vector2f(240, 70), 26);
+		//SAVE, EXPORT, MENU stacked top to bottom, the panel's full 240 px wide, panelButtonGap apart, MENU at the bottom
+		//(was a row of three 76 x 50 buttons side by side)
+		float buttonStep = panelButtonHeight + panelButtonGap;
+		float menuCenterY = playH - boardMargin - panelButtonHeight / 2;
+		Vector2f buttonSize(280, panelButtonHeight); //(was 240 wide)
+		saveButton.setup(font, "SAVE", Vector2f(panelLeft + 140, menuCenterY - 2 * buttonStep), buttonSize, 20);
+		exportButton.setup(font, "EXPORT", Vector2f(panelLeft + 140, menuCenterY - buttonStep), buttonSize, 20);
+		menuButton.setup(font, "MENU", Vector2f(panelLeft + 140, menuCenterY), buttonSize, 20);
 	};
 
 	// The board is created when START is pressed (a fresh board for every map)
@@ -257,6 +364,9 @@ int main(int argc, char* argv[])
 		GameBoard->boardname = mapNameBox.getText();
 		GameBoard->newMapSize = getNewMapSize(); //only used if the map doesn't exist yet
 		GameBoard->view = (MapView)viewDropdown.getSelectedIndex(); //keep the view chosen last time
+		GameBoard->colorMap = (ColorMap)colorMapDropdown.getSelectedIndex(); //and the colours
+		GameBoard->showSearched = searchedToggle.isOn();            //and whether searched cells light up
+		GameBoard->showWaypoints = waypointsToggle.isOn();          //and whether the path shows as its waypoints
 		GameBoard->importBoard(GameBoard->boardname); //cleans the name: "" -> "flat", "x.gridmap" -> "x"
 		layoutForMap(*GameBoard); //the window resizes to the map
 		//CHARACTER (relic, not used on the costmap branch):
@@ -274,11 +384,10 @@ int main(int argc, char* argv[])
 		gameState = PLAYING;
 	};
 
-	//PLAYING -> MENU, saving the map first if asked
-	auto returnToMenu = [&](bool save) {
-		if (save) {
-			GameBoard->exportBoard(GameBoard->boardname);
-		}
+	//PLAYING -> MENU (saving is done before, by saveMap(); was returnToMenu(bool save), which saved when asked)
+	auto returnToMenu = [&]() {
+		dialog.close();
+		exportPanel.close();
 		mapNameBox.setText(GameBoard->boardname); //so START reopens the same map
 		algorithmDropdown.setSelectedIndex((int)algorithm); //and with the algorithm last chosen in the panel
 		isPaintingTerrain = false;
@@ -305,6 +414,7 @@ int main(int argc, char* argv[])
 
 
 		GameBoard->view = (MapView)viewDropdown.getSelectedIndex();
+		GameBoard->colorMap = (ColorMap)colorMapDropdown.getSelectedIndex();
 
 
 		ClickMode chosenClickMode = (ClickMode)clickModeDropdown.getSelectedIndex();
@@ -338,14 +448,15 @@ int main(int argc, char* argv[])
 		return false;
 	};
 
-	//Set terrain: paints the cell under the mouse (and its brush neighbours) with the chosen height
+	//Set terrain: adds the brush's tapered Gaussian of the chosen height around the cell under the mouse (0: flattens).
+	//Once per click, and once more each time a drag enters another cell (lastPaintedTile).
 	auto paintTerrain = [&](int tile) {
 		if (tile == -1 || tile == lastPaintedTile) {
 			return;
 		}
 		//float elevation = getTerrainHeights()[terrainHeightDropdown.getSelectedIndex()].elevation; (was the preset only)
 		int brushWidth = getBrushWidths()[brushDropdown.getSelectedIndex()];
-		GameBoard->setTerrainHeight(tile, brushElevation, brushWidth, brushStrength / 100.f);
+		GameBoard->setTerrainHeight(tile, brushElevation, brushWidth); //(was: also brushStrength / 100.f)
 		lastPaintedTile = tile;
 	};
 
@@ -365,6 +476,152 @@ int main(int argc, char* argv[])
 		}
 	};
 
+	// --- saving and leaving ---
+	// leaveMap( where ): go to the menu / close the window, asking "Save changes?" first if there are unsaved edits.
+	// saveMap( then ): save, then go on to where (Stay = keep editing); an example map asks for a copy's name first.
+	enum class AfterSave { Stay, Menu, CloseWindow };
+	enum class DialogPurpose { SaveChanges, SaveCopy };
+	AfterSave pendingAfterSave = AfterSave::Stay;     //where to go once the dialog is answered
+	DialogPurpose dialogPurpose = DialogPurpose::SaveChanges;
+	std::string overwriteName;                        //a copy's name that already exists, confirmed by a second Save copy
+
+	//shows a short message over the bottom of the map
+	auto showToast = [&](const std::string& text) {
+		toastText = text;
+		toastClock.restart();
+	};
+
+	//goes on to where the user was going once the map is saved or not saved
+	auto finishLeaving = [&](AfterSave where) {
+		if (where == AfterSave::Menu) returnToMenu();
+		if (where == AfterSave::CloseWindow) window.close();
+	};
+
+	//saves the map (or asks for a copy's name on an example map), then goes on to where
+	auto saveMap = [&](AfterSave then) {
+		if (Board::isExampleMap(GameBoard->boardname)) {
+			pendingAfterSave = then;
+			dialogPurpose = DialogPurpose::SaveCopy;
+			overwriteName.clear();
+			dialog.open("'" + GameBoard->boardname + "' is an example map (tools/generate_maps makes it).\nSave a copy as:",
+				{ "Save copy", "Cancel" }, Vector2f(layoutW / 2, layoutH / 2), true, GameBoard->boardname + "_copy");
+			return;
+		}
+		GameBoard->exportBoard(GameBoard->boardname);
+		GameBoard->mapIsNew = false;
+		showToast("Saved maps/" + GameBoard->boardname + ".gridmap");
+		finishLeaving(then);
+	};
+
+	//goes to where, asking "Save changes?" first if the map has unsaved edits
+	auto leaveMap = [&](AfterSave where) {
+		if (!GameBoard->hasUnsavedChanges) {
+			finishLeaving(where);
+			return;
+		}
+		pendingAfterSave = where;
+		dialogPurpose = DialogPurpose::SaveChanges;
+		dialog.open("Save changes to '" + GameBoard->boardname + "'?", { "Save", "Don't save", "Cancel" }, Vector2f(layoutW / 2, layoutH / 2));
+	};
+
+	//acts on the dialog button picked (0 = the first)
+	auto handleDialogChoice = [&](int choice) {
+		if (dialogPurpose == DialogPurpose::SaveChanges) {
+			dialog.close();
+			if (choice == 0) saveMap(pendingAfterSave);       //Save (may open the Save copy dialog)
+			if (choice == 1) finishLeaving(pendingAfterSave); //Don't save
+			return;                                           //Cancel: stay
+		}
+		//Save copy: the typed name, cleaned like a menu name; example names are refused, an existing map needs a second click
+		if (choice != 0) {
+			dialog.close(); //Cancel: stay, without leaving
+			return;
+		}
+		std::string name = Board::cleanMapName(dialog.getText());
+		if (Board::isExampleMap(name)) {
+			dialog.setMessage("'" + name + "' is an example map too. Choose another name:");
+			return;
+		}
+		if (std::filesystem::exists("maps/" + name + ".gridmap") && name != overwriteName) {
+			overwriteName = name;
+			dialog.setMessage("'" + name + "' already exists. Save copy again to overwrite it:");
+			return;
+		}
+		dialog.close();
+		GameBoard->boardname = name;
+		window.setTitle("Aidan's TileMap - " + name);
+		saveMap(pendingAfterSave); //no longer an example map, so this saves and goes on
+	};
+
+	//EXPORT: writes the row's ROS 2 message to exports/<map>_<topic>.yaml, and / or copies it (or a command for it)
+	auto exportItem = [&](ExportChoice choice) {
+		const ExportItem& item = exportItems[choice.row];
+		const std::vector<int>& path = GameBoard->pathTiles;
+		std::ostringstream yaml;
+		std::string missing; //why there is nothing to export, if so
+		switch (choice.row) {
+		case 0:
+			if (GameBoard->map.hasLayer("elevation")) writeGridMapMessage(yaml, GameBoard->map, { "elevation" });
+			else missing = "This map has no elevation layer.";
+			break;
+		case 1:
+			writeGridMapMessage(yaml, GameBoard->map, GameBoard->map.getLayerNames());
+			break;
+		case 2:
+			writeOccupancyGridMessage(yaml, GameBoard->map, GameBoard->parameters);
+			break;
+		case 3:
+			if (!path.empty()) writePathMessage(yaml, GameBoard->map, path);
+			else missing = "There is no path yet (place a start and an end it can reach).";
+			break;
+		case 4:
+			if (!GameBoard->waypoints.empty()) writeWaypointsMessage(yaml, GameBoard->waypoints);
+			else missing = "There are no waypoints yet (they come with a path).";
+			break;
+		case 5:
+			//the positions only, as husky-stable_ws's unified_waypoint_control.py takes them on the command line (it reads
+			//its last argument as the marker heights, which are not part of the plan)
+			if (!GameBoard->waypoints.empty()) yaml << getWaypointListText(GameBoard->waypoints) << "\n";
+			else missing = "There are no waypoints yet (they come with a path).";
+			break;
+		case 6:
+			if (GameBoard->startExists) writePoseStampedMessage(yaml, GameBoard->map, GameBoard->startPos, path.empty() ? 0.0 : getPathYaw(GameBoard->map, path, 0));
+			else missing = "There is no start yet.";
+			break;
+		case 7:
+			if (GameBoard->endExists) writePoseStampedMessage(yaml, GameBoard->map, GameBoard->endPos, path.empty() ? 0.0 : getPathYaw(GameBoard->map, path, (int)path.size() - 1));
+			else missing = "There is no goal (end) yet.";
+			break;
+		}
+		if (!missing.empty()) {
+			exportPanel.setStatus(missing);
+			return;
+		}
+
+
+		//the file: always for Save file, and for Copy of a large item (its command reads the file)
+		std::string filename = "exports/" + GameBoard->boardname + "_" + item.file; //(was "_" + item.topic + ".yaml")
+		if (!choice.copy || item.large) {
+			std::filesystem::create_directories("exports");
+			std::ofstream file(filename);
+			file << yaml.str();
+		}
+		if (!choice.copy) {
+			exportPanel.setStatus("Saved " + filename);
+			return;
+		}
+		if (item.large) {
+			//canonical: the real path (build/exports is a link to the repository's exports/), so the command works anywhere
+			std::string command = getRosPublishCommand(item.topic, item.type, std::filesystem::canonical(filename).string());
+			Clipboard::setString(command);
+			exportPanel.setStatus("Copied a ros2 topic pub command for " + filename);
+		}
+		else {
+			Clipboard::setString(yaml.str());
+			exportPanel.setStatus("Copied the " + item.name + (item.topic.empty() ? "" : " YAML (" + item.type + ")"));
+		}
+	};
+
 	// Run the Program while the Window is Open
 	while (window.isOpen())
 	{
@@ -381,8 +638,12 @@ int main(int argc, char* argv[])
 		while (window.pollEvent(event))
 		{
 			// When X Button Clicked, Close Window
-			if (event.type == sf::Event::Closed)
-				window.close();
+			//(with unsaved edits on the map, ask "Save changes?" first; was: window.close() right away)
+			if (event.type == sf::Event::Closed) {
+				if (gameState == PLAYING && !dialog.isOpen()) leaveMap(AfterSave::CloseWindow);
+				else if (gameState != PLAYING) window.close();
+				continue;
+			}
 			//the window was resized or maximized (by the user, or by the window manager instead of our setSize()):
 			//keep that size from now on and fit the layout into it
 			if (event.type == sf::Event::Resized) {
@@ -421,14 +682,47 @@ int main(int argc, char* argv[])
 			}
 
 			// --- PLAYING ---
+			//releasing the left button always ends a terrain drag, even when a dialog that opened mid-drag takes the event
+			if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left) {
+				isPaintingTerrain = false;
+			}
+			//an open dialog or EXPORT panel takes every event, so nothing behind it reacts
+			if (dialog.isOpen()) {
+				int choice = dialog.handleEvent(event, mouse);
+				if (choice >= 0) handleDialogChoice(choice);
+				continue;
+			}
+			if (exportPanel.isOpen()) {
+				ExportChoice choice = exportPanel.handleEvent(event, mouse);
+				if (choice.row >= 0) exportItem(choice);
+				continue;
+			}
 			//the panel dropdowns (algorithm, view, left click, height, brush): an open list sits on top of the map and
 			//panel, so they get clicks first
 			//(was only the view dropdown: if (... && viewDropdown.handleClick(mouse)) { GameBoard->view = ...; continue; })
 			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && handlePanelClick(mouse)) {
 				continue;
 			}
-			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && saveMenuButton.contains(mouse)) {
-				returnToMenu(true);
+			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && searchedToggle.handleClick(mouse)) {
+				GameBoard->showSearched = searchedToggle.isOn();
+				continue;
+			}
+			if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && waypointsToggle.handleClick(mouse)) {
+				GameBoard->showWaypoints = waypointsToggle.isOn();
+				continue;
+			}
+			//if (... && saveMenuButton.contains(mouse)) { returnToMenu(true); continue; } (was SAVE & MENU)
+			bool leftPress = event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left;
+			if (leftPress && saveButton.contains(mouse)) {
+				saveMap(AfterSave::Stay);
+				continue;
+			}
+			if (leftPress && exportButton.contains(mouse)) {
+				exportPanel.open(Vector2f(layoutW / 2, layoutH / 2), std::min(620.f, layoutW - 20));
+				continue;
+			}
+			if (leftPress && menuButton.contains(mouse)) {
+				leaveMap(AfterSave::Menu);
 				continue;
 			}
 			if (event.type == sf::Event::KeyPressed) {
@@ -437,7 +731,8 @@ int main(int argc, char* argv[])
 						GameBoard->cancelPlacement(); //first Esc only unselects the tile
 					}
 					else {
-						returnToMenu(false); //back to the menu without saving
+						//returnToMenu(false); //back to the menu without saving (was: never saved, never asked)
+						leaveMap(AfterSave::Menu); //back to the menu, asking "Save changes?" if there are unsaved edits
 					}
 					continue;
 				}
@@ -451,8 +746,14 @@ int main(int argc, char* argv[])
 				//		GameBoard->spaceWasPressed = true;
 				//	}
 				//}
-				if (event.key.code == sf::Keyboard::E) {
-					returnToMenu(true); //same as the SAVE & MENU button
+				//E saved and went to the menu (same as the SAVE & MENU button); now Ctrl+S saves and Esc / MENU leaves
+				//if (event.key.code == sf::Keyboard::E) {
+				//	returnToMenu(true); //same as the SAVE & MENU button
+				//	continue;
+				//}
+				//Ctrl+S: save (same as the SAVE button); checked before S alone, which toggles the searched cells
+				if (event.key.code == sf::Keyboard::S && event.key.control) {
+					saveMap(AfterSave::Stay);
 					continue;
 				}
 				//OLD controls: Enter placed the start, then the end, on the selected tile (see Board::convertTile())
@@ -476,13 +777,7 @@ int main(int argc, char* argv[])
 					if (clickMode == ClickMode::SetTerrain) changeBrushElevation(-heightStep);
 					else GameBoard->movePlacementChoice(+1);
 				}
-				//Set terrain: Left / Right make the brush weaker / stronger (how far one click goes toward the height)
-				if (clickMode == ClickMode::SetTerrain && event.key.code == sf::Keyboard::Left) {
-					brushStrength = std::max(brushStrengthLowest, brushStrength - brushStrengthStep);
-				}
-				if (clickMode == ClickMode::SetTerrain && event.key.code == sf::Keyboard::Right) {
-					brushStrength = std::min(brushStrengthHighest, brushStrength + brushStrengthStep);
-				}
+				//(was: Set terrain: Left / Right made the brush weaker / stronger; the brush is additive now, with no strength)
 				if (event.key.code == sf::Keyboard::Enter) {
 					GameBoard->confirmPlacement();
 				}
@@ -493,6 +788,16 @@ int main(int argc, char* argv[])
 				if (event.key.code == sf::Keyboard::V) {
 					GameBoard->cycleView();
 					viewDropdown.setSelectedIndex((int)GameBoard->view);
+				}
+				//S: show / hide the purple searched cells (same as the toggle)
+				if (event.key.code == sf::Keyboard::S) {
+					searchedToggle.setOn(!searchedToggle.isOn());
+					GameBoard->showSearched = searchedToggle.isOn();
+				}
+				//W: show the path as its waypoints (yellow) or as every cell (blue), same as the Waypoints toggle
+				if (event.key.code == sf::Keyboard::W) {
+					waypointsToggle.setOn(!waypointsToggle.isOn());
+					GameBoard->showWaypoints = waypointsToggle.isOn();
 				}
 				//CHARACTER (relic, not used on the costmap branch):
 				//if (event.key.code == sf::Keyboard::W) {
@@ -682,7 +987,8 @@ int main(int argc, char* argv[])
 			out << std::fixed << std::setprecision(decimals) << value;
 			return out.str();
 		};
-		std::string info = "Map: " + GameBoard->boardname + (GameBoard->mapIsNew ? " (new)" : "") + "\n";
+		//"*": unsaved edits
+		std::string info = "Map: " + GameBoard->boardname + (GameBoard->hasUnsavedChanges ? " *" : "") + (GameBoard->mapIsNew ? " (new)" : "") + "\n";
 		info += "Size: " + std::to_string(GameBoard->map.getColumns()) + " x " + std::to_string(GameBoard->map.getRows()) + " cells ("
 			+ toText(GameBoard->map.getColumns() * GameBoard->map.getResolution(), 1) + " m)\n";
 		//info += "Algorithm: " + getPathAlgorithmName(algorithm) + "\n"; (was text only; now a dropdown)
@@ -691,6 +997,7 @@ int main(int argc, char* argv[])
 		for (const std::pair<std::string, Dropdown*>& dropdown : getPanelDropdowns()) {
 			info += dropdown.first + "\n\n\n";
 		}
+		info += "\n\n"; //the searched-cells toggle is drawn in the first of these lines (layoutPanel()), the second is a gap
 		if (!(GameBoard->startExists && GameBoard->endExists)) {
 			info += "Place a start and an end:\nclick a cell, then pick\nStart or End\n";
 		}
@@ -706,35 +1013,76 @@ int main(int argc, char* argv[])
 			}
 			info += "Path: " + std::to_string(GameBoard->pathTiles.size()) + " cells, "
 				+ toText(lengthCells * GameBoard->map.getResolution(), 1) + " m\n";
-			info += "Path cost: " + toText(GameBoard->pathCost, 1) + "\n";
-			info += "Searched: " + std::to_string(GameBoard->searchedTiles.size()) + " cells\n";
+			//info += "Path cost: " + toText(GameBoard->pathCost, 1) + "\n"; (cost and searched share a line now, so the
+			//info += "Searched: " + std::to_string(GameBoard->searchedTiles.size()) + " cells\n"; waypoints fit in three)
+			info += "Cost: " + toText(GameBoard->pathCost, 1) + ", searched: " + std::to_string(GameBoard->searchedTiles.size()) + "\n";
+			double waypointsTime = GameBoard->waypoints.empty() ? 0.0 : GameBoard->waypoints.back().time;
+			info += "Waypoints: " + std::to_string(GameBoard->waypoints.size()) + ", " + toText(waypointsTime, 1) + " s\n";
 		}
-		info += "\nControls:\n";
+		//info += "\nControls:\n"; (the heading is gone: the key / mouse sprites say what they are, and its line holds the S / W row)
+		info += "\n";
+		//the controls as key / mouse sprites and words (ControlsList), one row per line of the panel text; these were
+		//text lines (terrain: "Click / drag: set height", "Up/Down: height (Shift x5)", "Left/Right: strength",
+		//"V: view, Esc: menu"; start / end: "Click: select a cell", "Up / Down: choose", "Click again / Enter: place",
+		//"Right-click / Backspace:\n  unselect", "V: view, Ctrl+S: save", "Esc: unselect, then menu")
+		std::vector<std::vector<ControlItem>> controlRows;
 		if (clickMode == ClickMode::SetTerrain) {
-			info += "Click / drag: set height\n";
-			//info += "Up / Down: height +-1 cm\n"; info += "  (Shift: +-5 cm)\n"; (two lines; shortened to fit Left / Right)
-			info += "Up/Down: height (Shift x5)\n";
-			info += "Left/Right: strength\n";
-			info += "V: view, Esc: menu\n";
-			//info += "V: change view\n"; info += "Esc: menu\n"; (one line now, to fit the panel)
+			controlRows = {
+				{ { ControlIcon::MouseLeft, "" }, { ControlIcon::Text, "click / drag: add height" } },
+				{ { ControlIcon::ArrowUp, "" }, { ControlIcon::ArrowDown, "" }, { ControlIcon::Text, "height" }, { ControlIcon::WideKey, "Shift" }, { ControlIcon::Text, "x5" } },
+				//{ { ControlIcon::ArrowLeft, "" }, { ControlIcon::ArrowRight, "" }, { ControlIcon::Text, "strength" } }, (was)
+				{ { ControlIcon::Key, "V" }, { ControlIcon::Text, "view" }, { ControlIcon::WideKey, "Esc" }, { ControlIcon::Text, "menu" } },
+				{ { ControlIcon::Key, "S" }, { ControlIcon::Text, "searched" }, { ControlIcon::Key, "W" }, { ControlIcon::Text, "waypoints" } }
+			};
 		}
 		else {
-			info += "Click: select a cell\n";
-			info += "Up / Down: choose\n";
-			info += "Click again / Enter: place\n";
-			info += "Right-click / Backspace:\n  unselect\n";
-			info += "V: change view\n";
-			info += "Esc: unselect, then menu\n";
+			controlRows = {
+				{ { ControlIcon::MouseLeft, "" }, { ControlIcon::Text, "select a cell" } },
+				{ { ControlIcon::ArrowUp, "" }, { ControlIcon::ArrowDown, "" }, { ControlIcon::Text, "choose" } },
+				{ { ControlIcon::MouseLeft, "" }, { ControlIcon::Text, "again /" }, { ControlIcon::WideKey, "Enter" }, { ControlIcon::Text, "place" } },
+				{ { ControlIcon::MouseRight, "" }, { ControlIcon::Text, "/" }, { ControlIcon::WideKey, "Back" }, { ControlIcon::Text, "unselect" } },
+				{ { ControlIcon::Key, "V" }, { ControlIcon::Text, "view" }, { ControlIcon::WideKey, "Ctrl" }, { ControlIcon::Key, "S" }, { ControlIcon::Text, "save" } },
+				{ { ControlIcon::WideKey, "Esc" }, { ControlIcon::Text, "unselect, then menu" } },
+				{ { ControlIcon::Key, "S" }, { ControlIcon::Text, "searched" }, { ControlIcon::Key, "W" }, { ControlIcon::Text, "waypoints" } }
+			};
 		}
+		//the rows start on the line after the blank one; leave that many empty lines in the text for them
+		int controlsLine = (int)std::count(info.begin(), info.end(), '\n');
+		info += std::string(controlRows.size(), '\n');
 		panelText.setString(info);
 		window.draw(panelText);
-		saveMenuButton.draw(window, mouse);
+		controlsList.draw(window, Vector2f(panelLeft, boardMargin + controlsLine * panelLineHeight), controlRows);
+		//the colour scale of the current view, in its column left of the panel text, controls and buttons
+		GameBoard->drawLegend(window, font, FloatRect(panelLeft - legendColumnWidth, boardMargin, legendColumnWidth - 12, panelBottom - boardMargin));
+		//saveMenuButton.draw(window, mouse);
+		saveButton.draw(window, mouse);
+		exportButton.draw(window, mouse);
+		menuButton.draw(window, mouse);
+		searchedToggle.draw(window, mouse); //before the dropdowns, so an open list covers it
+		waypointsToggle.draw(window, mouse);
 		//viewDropdown.draw(window, mouse); (was drawn alone, last)
 		//the dropdowns are drawn last, bottom one first, so an open list covers the map, the panel and the dropdowns below it
 		std::vector<std::pair<std::string, Dropdown*>> panelDropdowns = getPanelDropdowns();
 		for (int i = (int)panelDropdowns.size() - 1; i >= 0; i--) {
 			panelDropdowns[i].second->draw(window, mouse);
 		}
+		//the toast: a short message over the bottom of the map, for toastSeconds after saving
+		if (!toastText.empty() && toastClock.getElapsedTime().asSeconds() < toastSeconds) {
+			Text toast(toastText, font, 17);
+			FloatRect bounds = toast.getLocalBounds();
+			RectangleShape toastBox(Vector2f(bounds.width + 24, 34));
+			toastBox.setOrigin(toastBox.getSize() / 2.f);
+			toastBox.setPosition(GameBoard->origin.x + GameBoard->boardW / 2, GameBoard->origin.y + GameBoard->boardH - 30);
+			toastBox.setFillColor(Color(25, 25, 55, 230));
+			toastBox.setOutlineColor(Color(150, 220, 150));
+			toastBox.setOutlineThickness(2);
+			window.draw(toastBox);
+			centerText(toast, toastBox.getPosition().x, toastBox.getPosition().y);
+			window.draw(toast);
+		}
+		//the dialog and the EXPORT panel go over everything
+		exportPanel.draw(window, mouse);
+		dialog.draw(window, mouse);
 		/* DRAW OBJECTS HERE */
 
 		window.display();

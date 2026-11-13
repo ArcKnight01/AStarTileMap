@@ -2,7 +2,17 @@
 #include <algorithm>
 #include <cmath>
 
-//collects the known elevation points (x, y, z in metres) within radius of a cell
+/**
+ * Collects the known elevation points (x, y, z in metres) within radius of a cell.
+ *
+ * @param map     Map with an "elevation" layer.
+ * @param column  Column of the centre cell.
+ * @param row     Row of the centre cell (0 = top row).
+ * @param radius  Window radius in metres (at least one cell).
+ * @param xs      Filled with the points' x (metres).
+ * @param ys      Filled with the points' y (metres).
+ * @param zs      Filled with the points' heights (metres).
+ */
 static void getWindowPoints(const GridMap& map, int column, int row, double radius,
 	std::vector<double>& xs, std::vector<double>& ys, std::vector<double>& zs) {
 	xs.clear(); ys.clear(); zs.clear();
